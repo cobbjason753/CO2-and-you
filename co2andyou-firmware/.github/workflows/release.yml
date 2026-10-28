@@ -1,0 +1,97 @@
+# Builds the firmware and publishes it for OTA whenever you push a tag like v2, v3, v4...
+#   git tag v2 && git push origin v2
+#
+# Devices fetch https://<user>.github.io/<repo>/version.txt and install the .bin it points to.
+
+name: Release firmware
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # create the GitHub Release
+  pages: write      # publish to GitHub Pages
+  id-token: write   # required by deploy-pages
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  SKETCH: Dsp_v1_Cloud
+  ESP32_CORE: esp32:esp32@3.3.12
+  # Must match the board + partition scheme you flash over USB.
+  # Copy it from Arduino IDE: turn on File > Preferences > "Show verbose output during compile",
+  # click Verify, and copy the value after --fqbn (or "FQBN:") in the output.
+  # Example for an 8 MB S3 board:
+  #   esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB,CDCOnBoot=cdc
+  FQBN: esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out version from tag
+        id: ver
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          if ! [[ "$V" =~ ^[0-9]+$ ]]; then
+            echo "Tag must be v<integer>, e.g. v7 (got $GITHUB_REF_NAME)"; exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core and libraries
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install "$ESP32_CORE"
+          arduino-cli lib install "WiFiManager" "Adafruit SSD1306" "Adafruit GFX Library" "SparkFun SCD4x Arduino Library"
+
+      - name: Write secrets.h from repository secret
+        env:
+          INFLUX_TOKEN: ${{ secrets.INFLUX_TOKEN }}
+        run: |
+          if [ -z "$INFLUX_TOKEN" ]; then echo "INFLUX_TOKEN secret is not set"; exit 1; fi
+          printf '#pragma once\nconst char* INFLUX_TOKEN = "%s";\n' "$INFLUX_TOKEN" > "$SKETCH/secrets.h"
+
+      - name: Compile
+        run: |
+          arduino-cli compile \
+            --fqbn "$FQBN" \
+            --build-property "compiler.cpp.extra_flags=-DFW_VERSION=${{ steps.ver.outputs.version }}" \
+            --output-dir build \
+            "$SKETCH"
+
+      - name: Assemble OTA site
+        run: |
+          V=${{ steps.ver.outputs.version }}
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          mkdir -p site
+          cp "build/$SKETCH.ino.bin" "site/firmware-v$V.bin"
+          printf '%s\nhttps://%s.github.io/%s/firmware-v%s.bin\n' "$V" "$OWNER" "$REPO" "$V" > site/version.txt
+          cat site/version.txt
+          ls -l site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Publish to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
+
+      - name: Keep a copy on the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: site/firmware-v${{ steps.ver.outputs.version }}.bin
