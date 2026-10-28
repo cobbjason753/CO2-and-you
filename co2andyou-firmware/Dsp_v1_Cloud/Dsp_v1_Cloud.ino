@@ -74,7 +74,7 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 // Published by the GitHub Action to GitHub Pages. version.txt is two lines:
 //   7
 //   https://YOUR-GITHUB-USER.github.io/YOUR-REPO/firmware-v7.bin
-const char* OTA_MANIFEST_URL = "https://YOUR-GITHUB-USER.github.io/YOUR-REPO/version.txt";
+const char* OTA_MANIFEST_URL = "https://cobbjason753-GITHUB-USER.github.io/CO2-and-you/version.txt";
 // TLS for OTA uses the core's built-in Mozilla root bundle (needs ESP32 core 3.3.12+).
 
 const unsigned long OTA_CHECK_INTERVAL = 6UL * 60UL * 60UL * 1000UL; // check every 6 hours
