@@ -18,8 +18,23 @@
 #include <esp_ota_ops.h>
 //End jcobb changes
 
-const char* AP_NAME = "CO2AndYou-Setup";
-const char* AP_PASSWORD = "cleanair2026";
+// ---- Setup portal ----
+// Each device makes its own setup network, "CO2AndYou-XXXX" (last 4 hex digits of its MAC),
+// with a random password generated on first boot. The OLED shows a QR code that joins it.
+char apName[20];
+char apPassword[12];
+#include <qrcode.h>          // QR generator built into the ESP32 core (ESP-IDF)
+
+// House and location labels, entered by the customer in the setup portal and sent
+// with every reading. Stored in NVS, so OTA updates and reboots keep them.
+const int ID_MAX_LEN = 32;
+char houseId[ID_MAX_LEN + 1]    = "unassigned";
+char locationId[ID_MAX_LEN + 1] = "unassigned";
+Preferences setupPrefs;
+
+const int SETUP_BUTTON_PIN = 0;                   // BOOT button on ESP32-S3 dev boards
+const unsigned long SETUP_HOLD_MS = 5000;         // hold this long to reopen setup
+unsigned long setupButtonDownSince = 0;
 
 //Begin jcobb Changes
 // ---- InfluxDB Cloud ----
@@ -27,8 +42,7 @@ const char* INFLUX_URL    = "https://us-east-1-1.aws.cloud2.influxdata.com";
 const char* INFLUX_ORG    = "Prototype";
 const char* INFLUX_BUCKET = "Test";
 #include "secrets.h"        // defines INFLUX_TOKEN; kept out of git (see secrets.example.h)
-//const char* DEVICE_LOCATION = "downstairs";
-char DEVICE_LOCATION[20];   // filled in at startup with the chip's unique ID
+char DEVICE_ID[20];   // filled in at startup with the chip's unique ID (esp32-<MAC>)
 
 const char* INFLUX_ROOT_CA = R"EOF(
 -----BEGIN CERTIFICATE-----
@@ -134,11 +148,14 @@ void setup() {
   Serial.println("CP1: Serial up");
   uint8_t mac[6];
   esp_read_mac(mac, ESP_MAC_WIFI_STA);
-  snprintf(DEVICE_LOCATION, sizeof(DEVICE_LOCATION), "esp32-%02X%02X%02X%02X%02X%02X",
+  snprintf(DEVICE_ID, sizeof(DEVICE_ID), "esp32-%02X%02X%02X%02X%02X%02X",
            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
   Serial.print("Device ID: ");
-  Serial.println(DEVICE_LOCATION);
+  Serial.println(DEVICE_ID);
   Serial.printf("Firmware v%d\n", FW_VERSION);
+  snprintf(apName, sizeof(apName), "CO2AndYou-%02X%02X", mac[4], mac[5]);
+  pinMode(SETUP_BUTTON_PIN, INPUT_PULLUP);
+  loadSetupSettings();
   otaBootCheck();   // early, so a build that crashes during setup still gets counted
   Wire.begin(8, 9);
   Serial.println("CP2: Wire up");
@@ -180,20 +197,19 @@ void setup() {
   lastSentTs = prefs.getLong64("lastSent", 0);
   //End jcobb changes
 
-  WiFiManager wm;
-  if (otaTrial) wm.setConfigPortalTimeout(120);  // new build can't get online -> restart -> counts toward rollback
-  bool connected = wm.autoConnect(AP_NAME, AP_PASSWORD);
-  if (!connected) {
-    Serial.println("Setup timed out, restarting.");
-    ESP.restart();
-  }
+  connectWiFiWithSetupPortal();
   Serial.println("CP7: WiFi connected");
 
   Serial.print("Connected! IP address: ");
   Serial.println(WiFi.localIP());
 
-  if (MDNS.begin("co2you")) {
-    Serial.println("Dashboard also reachable at: http://co2you.local");
+  // Unique per device, so several devices on one network don't collide:
+  // co2you-<location_id>.local, or co2you-xxxx.local until a location is set
+  char mdnsName[48];
+  if (strcmp(locationId, "unassigned") != 0) snprintf(mdnsName, sizeof(mdnsName), "co2you-%s", locationId);
+  else snprintf(mdnsName, sizeof(mdnsName), "co2you-%c%c%c%c", tolower(apName[10]), tolower(apName[11]), tolower(apName[12]), tolower(apName[13]));
+  if (MDNS.begin(mdnsName)) {
+    Serial.printf("Dashboard also reachable at: http://%s.local\n", mdnsName);
   }
 
   configTime(0, 0, "pool.ntp.org");
@@ -242,7 +258,8 @@ void loop() {
 
   if (millis() - lastDisplaySwitch >= displayInterval) {
     lastDisplaySwitch = millis();
-    displayMode = (displayMode + 1) % 3;
+    // A 4th screen reminds the owner to name the device until House/Location IDs are set
+    displayMode = (displayMode + 1) % (idsAssigned() ? 3 : 4);
   }
 
   if (millis() - lastOtaCheck >= OTA_CHECK_INTERVAL) {
@@ -251,7 +268,7 @@ void loop() {
   }
   otaTrialTick();
 
-  updateDisplay();
+  if (!checkSetupButton()) updateDisplay();
   updateLED();
   delay(200);
 }
@@ -267,6 +284,16 @@ void updateDisplay() {
     display.println("Sensor error");
     display.setCursor(0, 20);
     display.println("Check wiring");
+    display.display();
+    return;
+  }
+
+  if (displayMode == 3) {
+    display.println("Not named yet");
+    display.setCursor(0, 20);
+    display.println("Hold BOOT button");
+    display.println("5 seconds to set");
+    display.println("House & Location");
     display.display();
     return;
   }
@@ -366,7 +393,8 @@ void handleRoot() {
   } else {
     html += "<p>No readings yet.</p>";
   }
-  html += "<p style='color:#888;font-size:0.8em'>" + String(DEVICE_LOCATION) + " &middot; firmware v" + String(FW_VERSION) + "</p>";
+  html += "<p>House: <b>" + String(houseId) + "</b> &nbsp; Location: <b>" + String(locationId) + "</b></p>";
+  html += "<p style='color:#888;font-size:0.8em'>" + String(DEVICE_ID) + " &middot; firmware v" + String(FW_VERSION) + "</p>";
   html += "</body></html>";
   server.send(200, "text/html", html);
 }
@@ -396,10 +424,12 @@ void sendToInflux() {
     Reading& r = history[idx];
     if (r.timestamp <= lastSentTs) continue;
 
-    char line[160];
+    // Tags (sorted by key): device_id, house_id, location_id. IDs are sanitized to a-z 0-9 '-',
+    // so they never need line-protocol escaping.
+    char line[256];
     snprintf(line, sizeof(line),
-      "environment,location=%s co2_ppm=%di,temp_f=%.1f,humidity_pct=%.1f,fw_version=%di %lld\n",
-      DEVICE_LOCATION, (int)r.co2, celsiusToFahrenheit(r.temp), r.hum, FW_VERSION,
+      "environment,device_id=%s,house_id=%s,location_id=%s co2_ppm=%di,temp_f=%.1f,humidity_pct=%.1f,fw_version=%di %lld\n",
+      DEVICE_ID, houseId, locationId, (int)r.co2, celsiusToFahrenheit(r.temp), r.hum, FW_VERSION,
       (long long)r.timestamp);
     body += line;
     newest = r.timestamp;
@@ -539,4 +569,224 @@ void otaCheckForUpdate() {
     Serial.printf("OTA: update failed (%d) %s\n",
                   httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
   }
+}
+
+// ================= Device setup: QR code, WiFi, House ID / Location ID =================
+// First boot (or after holding BOOT for 5 s): the device opens its own setup network and
+// shows a QR code on the OLED. Scanning it with a phone camera joins that network, and the
+// phone pops up the setup page: pick home WiFi, enter House ID and Location ID, Save.
+
+const char SETUP_HELP_HTML[] =
+  "<p><b>House ID</b> names your home, for example <i>smith-home</i>. "
+  "Use the <b>exact same</b> House ID on every CO2 &amp; You device in your home.</p>"
+  "<p><b>Location ID</b> names where this device is, for example <i>kitchen</i> or <i>bedroom-2</i>. "
+  "Each device in your home needs a <b>different</b> Location ID.</p>"
+  "<p style='color:#666;font-size:0.9em'>Letters, numbers and dashes only; capitals and spaces are "
+  "converted automatically (\"Living Room\" becomes living-room). Just renaming this device? "
+  "You can leave the WiFi fields empty.</p>";
+
+WiFiManagerParameter paramHelp(SETUP_HELP_HTML);
+WiFiManagerParameter paramHouse("house_id", "House ID", "", ID_MAX_LEN, "required placeholder='e.g. smith-home'");
+WiFiManagerParameter paramLocation("location_id", "Location ID", "", ID_MAX_LEN, "required placeholder='e.g. kitchen'");
+
+bool idsAssigned() {
+  return strcmp(houseId, "unassigned") != 0 && strcmp(locationId, "unassigned") != 0;
+}
+
+// Lowercase; letters and digits kept; spaces, '_' and '.' become '-'; everything else dropped.
+// Keeps IDs consistent across devices ("Smith Home" == "smith home") and safe for InfluxDB tags,
+// HTML and mDNS hostnames.
+void sanitizeId(const char* in, char* out, size_t outSize) {
+  size_t n = 0;
+  bool lastDash = true;   // suppresses leading dashes
+  for (const char* p = in; *p && n < outSize - 1; p++) {
+    char c = tolower((unsigned char)*p);
+    if (isalnum((unsigned char)c)) { out[n++] = c; lastDash = false; }
+    else if ((c == ' ' || c == '-' || c == '_' || c == '.') && !lastDash) { out[n++] = '-'; lastDash = true; }
+  }
+  while (n > 0 && out[n - 1] == '-') n--;
+  out[n] = '\0';
+}
+
+void loadSetupSettings() {
+  setupPrefs.begin("setup", false);
+
+  String pw = setupPrefs.getString("apPass", "");
+  if (pw.length() < 8) {
+    // No look-alike characters (0/o, 1/l/i) so it can also be typed from the screen
+    const char* chars = "abcdefghjkmnpqrstuvwxyz23456789";
+    char buf[9];
+    for (int i = 0; i < 8; i++) buf[i] = chars[esp_random() % strlen(chars)];
+    buf[8] = '\0';
+    pw = buf;
+    setupPrefs.putString("apPass", pw);
+  }
+  strlcpy(apPassword, pw.c_str(), sizeof(apPassword));
+
+  String h = setupPrefs.getString("house", "");
+  String l = setupPrefs.getString("loc", "");
+  if (h.length()) strlcpy(houseId, h.c_str(), sizeof(houseId));
+  if (l.length()) strlcpy(locationId, l.c_str(), sizeof(locationId));
+  Serial.printf("House ID: %s  Location ID: %s\n", houseId, locationId);
+}
+
+void saveIdsFromPortal() {
+  char h[ID_MAX_LEN + 1], l[ID_MAX_LEN + 1];
+  sanitizeId(paramHouse.getValue(), h, sizeof(h));
+  sanitizeId(paramLocation.getValue(), l, sizeof(l));
+  if (h[0]) { strlcpy(houseId, h, sizeof(houseId)); setupPrefs.putString("house", houseId); }
+  if (l[0]) { strlcpy(locationId, l, sizeof(locationId)); setupPrefs.putString("loc", locationId); }
+  Serial.printf("Saved House ID: %s  Location ID: %s\n", houseId, locationId);
+}
+
+// ---- OLED setup screens ----
+int qrOffsetX = 0, qrOffsetY = 0;
+
+void drawQrOnDisplay(esp_qrcode_handle_t qr) {
+  int size = esp_qrcode_get_size(qr);
+  int scale = (size * 2 <= 60) ? 2 : 1;
+  int px = size * scale;
+  // QR scanners expect dark modules on a light background with a margin, so draw a white panel
+  display.fillRect(qrOffsetX, qrOffsetY, 64, 64, SSD1306_WHITE);
+  int ox = qrOffsetX + (64 - px) / 2;
+  int oy = qrOffsetY + (64 - px) / 2;
+  for (int y = 0; y < size; y++)
+    for (int x = 0; x < size; x++)
+      if (esp_qrcode_get_module(qr, x, y))
+        display.fillRect(ox + x * scale, oy + y * scale, scale, scale, SSD1306_BLACK);
+}
+
+void showSetupQrScreen() {
+  if (!oledOK) return;
+  // Standard WiFi QR format, understood by the iPhone and Android camera apps
+  char payload[80];
+  snprintf(payload, sizeof(payload), "WIFI:T:WPA;S:%s;P:%s;;", apName, apPassword);
+
+  display.clearDisplay();
+  qrOffsetX = 0; qrOffsetY = 0;
+  esp_qrcode_config_t cfg = { drawQrOnDisplay, 3, ESP_QRCODE_ECC_LOW };   // version 3 = 29x29, fits at 2x
+  esp_qrcode_generate(&cfg, payload);
+
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(70, 4);  display.println("SETUP");
+  display.setCursor(70, 22); display.println("Scan with");
+  display.setCursor(70, 32); display.println("phone");
+  display.setCursor(70, 42); display.println("camera");
+  display.display();
+}
+
+void showSetupTextScreen() {
+  if (!oledOK) return;
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(0, 0);  display.println("No camera? Join WiFi:");
+  display.setCursor(0, 12); display.println(apName);
+  display.setCursor(0, 26); display.println("Password:");
+  display.setCursor(0, 36); display.println(apPassword);
+  display.setCursor(0, 52); display.println("Open 192.168.4.1");
+  display.display();
+}
+
+void showMessage(const char* line1, const char* line2) {
+  if (!oledOK) return;
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(0, 16); display.println(line1);
+  display.setCursor(0, 32); display.println(line2);
+  display.display();
+}
+
+// Connects to saved WiFi, or runs the setup portal until the customer finishes.
+void connectWiFiWithSetupPortal() {
+  bool forceSetup = setupPrefs.getBool("force", false);
+  if (forceSetup) setupPrefs.putBool("force", false);
+
+  paramHouse.setValue(idsAssigned() ? houseId : "", ID_MAX_LEN);
+  paramLocation.setValue(idsAssigned() ? locationId : "", ID_MAX_LEN);
+
+  WiFiManager wm;
+  wm.setTitle("CO2 &amp; You Setup");
+  std::vector<const char*> menu = {"wifi"};
+  wm.setMenu(menu);
+  wm.addParameter(&paramHelp);
+  wm.addParameter(&paramHouse);
+  wm.addParameter(&paramLocation);
+  wm.setSaveParamsCallback(saveIdsFromPortal);
+  wm.setBreakAfterConfig(true);        // close the portal after Save even if WiFi was left blank
+  wm.setConfigPortalBlocking(false);   // lets the OLED alternate screens while waiting
+  if (otaTrial) wm.setConfigPortalTimeout(120);  // new build can't get online -> restart -> counts toward rollback
+
+  bool connected;
+  if (forceSetup) {
+    Serial.println("Setup requested with BOOT button");
+    wm.startConfigPortal(apName, apPassword);
+    connected = false;
+  } else {
+    // Devices that already have WiFi but no IDs (e.g. updated over the air) keep running;
+    // they show a "Not named yet" reminder instead of blocking on the portal.
+    connected = wm.autoConnect(apName, apPassword);
+  }
+
+  if (connected) return;
+
+  Serial.printf("Setup portal open. WiFi: %s  Password: %s\n", apName, apPassword);
+  unsigned long lastSwap = 0;
+  bool qrShown = false;
+  while (true) {
+    wm.process();
+    otaTrialTick();
+
+    if (!wm.getConfigPortalActive()) {
+      if (WiFi.status() == WL_CONNECTED) {
+        showMessage("Setup complete!", "Connected to WiFi");
+        delay(2000);
+        if (forceSetup) {           // reboot so new names (and hostname) take effect cleanly
+          saveHistoryToFlash();
+          ESP.restart();
+        }
+        return;
+      }
+      // Saved without WiFi, WiFi failed, or timed out: reboot and try the saved network
+      showMessage("Restarting...", "");
+      delay(1000);
+      ESP.restart();
+    }
+
+    if (millis() - lastSwap > 8000 || lastSwap == 0) {
+      lastSwap = millis();
+      qrShown = !qrShown;
+      if (qrShown) showSetupQrScreen(); else showSetupTextScreen();
+    }
+    delay(10);
+  }
+}
+
+// Hold BOOT for 5 s while running to reopen setup (new WiFi or new names).
+// Returns true while it is drawing on the OLED.
+bool checkSetupButton() {
+  if (digitalRead(SETUP_BUTTON_PIN) != LOW) {
+    setupButtonDownSince = 0;
+    return false;
+  }
+  if (setupButtonDownSince == 0) setupButtonDownSince = millis();
+  unsigned long held = millis() - setupButtonDownSince;
+  if (held < 1000) return false;
+
+  if (held < SETUP_HOLD_MS) {
+    char buf[24];
+    snprintf(buf, sizeof(buf), "Keep holding... %lu", (SETUP_HOLD_MS - held) / 1000 + 1);
+    showMessage("Setup mode", buf);
+    return true;
+  }
+
+  showMessage("Release button", "to start setup");
+  while (digitalRead(SETUP_BUTTON_PIN) == LOW) delay(20);   // restart only after release
+  setupPrefs.putBool("force", true);
+  saveHistoryToFlash();
+  delay(200);
+  ESP.restart();
+  return true;
 }
