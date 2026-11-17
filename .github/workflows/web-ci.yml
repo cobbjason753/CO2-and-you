@@ -1,0 +1,38 @@
+name: Web app checks
+
+on:
+  push:
+    paths: ['web/**', '.github/workflows/web-ci.yml']
+  pull_request:
+    paths: ['web/**']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: cobsci_test
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npx vitest run
+        env:
+          TEST_DATABASE_URL: postgres://postgres@localhost:5432/cobsci_test
+      - run: npx next build
+        env:
+          DATABASE_URL: postgres://postgres@localhost:5432/cobsci_test
+          APP_SECRET: ci-only-secret-not-used-for-anything

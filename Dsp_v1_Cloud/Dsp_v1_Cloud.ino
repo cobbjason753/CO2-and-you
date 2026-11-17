@@ -14,8 +14,10 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <Preferences.h>
-#include <HTTPUpdate.h>
+#include <Update.h>
 #include <esp_ota_ops.h>
+#include <ArduinoJson.h>
+#include "mbedtls/md.h"
 //End jcobb changes
 
 // ---- Setup portal ----
@@ -25,58 +27,30 @@ char apName[20];
 char apPassword[12];
 #include <qrcode.h>          // QR generator built into the ESP32 core (ESP-IDF)
 
-// House and location labels, entered by the customer in the setup portal and sent
-// with every reading. Stored in NVS, so OTA updates and reboots keep them.
-const int ID_MAX_LEN = 32;
-char houseId[ID_MAX_LEN + 1]    = "unassigned";
-char locationId[ID_MAX_LEN + 1] = "unassigned";
+// The device's name now comes from the CO2 & You portal: the customer names the room there
+// and the server returns it with every upload. Kept in NVS so it shows straight after a reboot.
+// (Earlier firmware asked for a House ID and Location ID on the setup page; an old Location ID
+//  is sent once at enrollment so the portal can pre-fill the room name.)
+const int NAME_MAX_LEN = 40;
+char displayName[NAME_MAX_LEN + 1] = "";   // "" = not named yet
+bool claimed = false;                      // server says this device belongs to a house
+char legacyLocation[33] = "";
 Preferences setupPrefs;
 
 const int SETUP_BUTTON_PIN = 0;                   // BOOT button on ESP32-S3 dev boards
 const unsigned long SETUP_HOLD_MS = 5000;         // hold this long to reopen setup
 unsigned long setupButtonDownSince = 0;
 
-//Begin jcobb Changes
-// ---- InfluxDB Cloud ----
-const char* INFLUX_URL    = "https://us-east-1-1.aws.cloud2.influxdata.com";
-const char* INFLUX_ORG    = "Prototype";
-const char* INFLUX_BUCKET = "Test";
-#include "secrets.h"        // defines INFLUX_TOKEN; kept out of git (see secrets.example.h)
-char DEVICE_ID[20];   // filled in at startup with the chip's unique ID (esp32-<MAC>)
-
-const char* INFLUX_ROOT_CA = R"EOF(
------BEGIN CERTIFICATE-----
-MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
-TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh
-cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwHhcNMTUwNjA0MTEwNDM4
-WhcNMzUwNjA0MTEwNDM4WjBPMQswCQYDVQQGEwJVUzEpMCcGA1UEChMgSW50ZXJu
-ZXQgU2VjdXJpdHkgUmVzZWFyY2ggR3JvdXAxFTATBgNVBAMTDElTUkcgUm9vdCBY
-MTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAK3oJHP0FDfzm54rVygc
-h77ct984kIxuPOZXoHj3dcKi/vVqbvYATyjb3miGbESTtrFj/RQSa78f0uoxmyF+
-0TM8ukj13Xnfs7j/EvEhmkvBioZxaUpmZmyPfjxwv60pIgbz5MDmgK7iS4+3mX6U
-A5/TR5d8mUgjU+g4rk8Kb4Mu0UlXjIB0ttov0DiNewNwIRt18jA8+o+u3dpjq+sW
-T8KOEUt+zwvo/7V3LvSye0rgTBIlDHCNAymg4VMk7BPZ7hm/ELNKjD+Jo2FR3qyH
-B5T0Y3HsLuJvW5iB4YlcNHlsdu87kGJ55tukmi8mxdAQ4Q7e2RCOFvu396j3x+UC
-B5iPNgiV5+I3lg02dZ77DnKxHZu8A/lJBdiB3QW0KtZB6awBdpUKD9jf1b0SHzUv
-KBds0pjBqAlkd25HN7rOrFleaJ1/ctaJxQZBKT5ZPt0m9STJEadao0xAH0ahmbWn
-OlFuhjuefXKnEgV4We0+UXgVCwOPjdAvBbI+e0ocS3MFEvzG6uBQE3xDk3SzynTn
-jh8BCNAw1FtxNrQHusEwMFxIt4I7mKZ9YIqioymCzLq9gwQbooMDQaHWBfEbwrbw
-qHyGO0aoSCqI3Haadr8faqU9GY/rOPNk3sgrDQoo//fb4hVC1CLQJ13hef4Y53CI
-rU7m2Ys6xt0nUW7/vGT1M0NPAgMBAAGjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNV
-HRMBAf8EBTADAQH/MB0GA1UdDgQWBBR5tFnme7bl5AFzgAiIyBpY9umbbjANBgkq
-hkiG9w0BAQsFAAOCAgEAVR9YqbyyqFDQDLHYGmkgJykIrGF1XIpu+ILlaS/V9lZL
-ubhzEFnTIZd+50xx+7LSYK05qAvqFyFWhfFQDlnrzuBZ6brJFe+GnY+EgPbk6ZGQ
-3BebYhtF8GaV0nxvwuo77x/Py9auJ/GpsMiu/X1+mvoiBOv/2X/qkSsisRcOj/KK
-NFtY2PwByVS5uCbMiogziUwthDyC3+6WVwW6LLv3xLfHTjuCvjHIInNzktHCgKQ5
-ORAzI4JMPJ+GslWYHb4phowim57iaztXOoJwTdwJx4nLCgdNbOhdjsnvzqvHu7Ur
-TkXWStAmzOVyyghqpZXjFaH3pO3JLF+l+/+sKAIuvtd7u+Nxe5AW0wdeRlN8NwdC
-jNPElpzVmbUq4JUagEiuTDkHzsxHpFKVK7q4+63SM1N95R1NbdWhscdCb+ZAJzVc
-oyi3B43njTOQ5yOf+1CceWxG1bQVs5ZufpsMljq4Ui0/1lvh+wjChP4kqKOJ2qxq
-4RgqsahDYVvTH9w7jXbyLeiNdd8XM2w9U/t7y0Ff/9yi0GE44Za4rF2LN9d11TPA
-mRGunUHBcnWEvgJBQl9nJEiU0Zsnvgc/ubhPgXRR4Xq37Z0j4r7g1SgEEzwxA57d
-emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
------END CERTIFICATE-----
-)EOF";
+// ---- CO2 & You platform API ----
+// Every reading goes to our backend, signed with this device's own secret. No shared
+// credentials live in the firmware, and one unit can be revoked without touching the rest.
+const char* API_BASE = "https://app.cobsci.com";
+char DEVICE_ID[20];        // filled in at startup with the chip's unique ID (esp32-<MAC>)
+char deviceSecret[65];     // 32 random bytes as hex, generated on first boot, kept in NVS
+bool enrolled = false;     // server has accepted our secret
+Preferences devPrefs;
+// TLS: the core's built-in Mozilla root bundle validates the server certificate
+// (needs ESP32 core 3.3.12+), so a certificate renewal or CA change needs no firmware update.
 
 // ---- OTA updates ----
 // Release builds get FW_VERSION from the git tag (v7 -> 7) via the GitHub Action.
@@ -85,21 +59,15 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 #define FW_VERSION 1
 #endif
 
-// Published by the GitHub Action to GitHub Pages. version.txt is two lines:
-//   7
-//   https://YOUR-GITHUB-USER.github.io/YOUR-REPO/firmware-v7.bin
-const char* OTA_MANIFEST_URL = "https://cobbjason753.github.io/CO2-and-you/version.txt";
-// TLS for OTA uses the core's built-in Mozilla root bundle (needs ESP32 core 3.3.12+).
-
-const unsigned long OTA_CHECK_INTERVAL = 6UL * 60UL * 60UL * 1000UL; // check every 6 hours
-const unsigned long OTA_TRIAL_TIMEOUT  = 20UL * 60UL * 1000UL;       // new build must upload to Influx within 20 min
+// The server decides which build each device should run (staff roll releases out to a pilot
+// group first, then everyone) and offers it in the reply to an upload: version, URL, SHA-256.
+const unsigned long OTA_TRIAL_TIMEOUT  = 20UL * 60UL * 1000UL;       // new build must upload successfully within 20 min
 const int OTA_TRIAL_MAX_BOOTS = 3;                                    // ...and not reboot more than 3 times
-unsigned long lastOtaCheck = 0;
 bool otaTrial = false;   // true while a freshly installed build is still proving itself
 Preferences otaPrefs;
 
 Preferences prefs;
-time_t lastSentTs = 0;   // timestamp of the newest reading confirmed in InfluxDB
+time_t lastSentTs = 0;   // timestamp of the newest reading confirmed by the server
 //End jcobb changes
 
 #define SCREEN_WIDTH 128
@@ -156,6 +124,7 @@ void setup() {
   snprintf(apName, sizeof(apName), "CO2AndYou-%02X%02X", mac[4], mac[5]);
   pinMode(SETUP_BUTTON_PIN, INPUT_PULLUP);
   loadSetupSettings();
+  loadDeviceSecret();
   otaBootCheck();   // early, so a build that crashes during setup still gets counted
   Wire.begin(8, 9);
   Serial.println("CP2: Wire up");
@@ -193,7 +162,7 @@ void setup() {
   Serial.println("CP6: LittleFS done");
 
   //Begin jcobb changes
-    prefs.begin("influx", false);
+  prefs.begin("influx", false);   // namespace name kept so the upload position survives the update
   lastSentTs = prefs.getLong64("lastSent", 0);
   //End jcobb changes
 
@@ -203,11 +172,9 @@ void setup() {
   Serial.print("Connected! IP address: ");
   Serial.println(WiFi.localIP());
 
-  // Unique per device, so several devices on one network don't collide:
-  // co2you-<location_id>.local, or co2you-xxxx.local until a location is set
+  // Unique per device, so several devices on one network don't collide: co2you-xxxx.local
   char mdnsName[48];
-  if (strcmp(locationId, "unassigned") != 0) snprintf(mdnsName, sizeof(mdnsName), "co2you-%s", locationId);
-  else snprintf(mdnsName, sizeof(mdnsName), "co2you-%c%c%c%c", tolower(apName[10]), tolower(apName[11]), tolower(apName[12]), tolower(apName[13]));
+  snprintf(mdnsName, sizeof(mdnsName), "co2you-%c%c%c%c", tolower(apName[10]), tolower(apName[11]), tolower(apName[12]), tolower(apName[13]));
   if (MDNS.begin(mdnsName)) {
     Serial.printf("Dashboard also reachable at: http://%s.local\n", mdnsName);
   }
@@ -230,8 +197,7 @@ void setup() {
   server.begin();
   Serial.println("CP10: server started");
 
-  lastOtaCheck = millis();
-  otaCheckForUpdate();
+  enrollWithServer();
 }
 
 void loop() {
@@ -250,22 +216,16 @@ void loop() {
       if (readingCount < MAX_READINGS) readingCount++;
       saveHistoryToFlash();
       Serial.println("Sample logged.");
-      //Begin jcobb changes
-            sendToInflux();
-            //End jcobb Changes
+      sendReadings();
     }
   }
 
   if (millis() - lastDisplaySwitch >= displayInterval) {
     lastDisplaySwitch = millis();
-    // A 4th screen reminds the owner to name the device until House/Location IDs are set
-    displayMode = (displayMode + 1) % (idsAssigned() ? 3 : 4);
+    // A 4th screen reminds the owner to link / name the device in the portal
+    displayMode = (displayMode + 1) % (displayName[0] ? 3 : 4);
   }
 
-  if (millis() - lastOtaCheck >= OTA_CHECK_INTERVAL) {
-    lastOtaCheck = millis();
-    otaCheckForUpdate();
-  }
   otaTrialTick();
 
   if (!checkSetupButton()) updateDisplay();
@@ -289,11 +249,23 @@ void updateDisplay() {
   }
 
   if (displayMode == 3) {
-    display.println("Not named yet");
-    display.setCursor(0, 20);
-    display.println("Hold BOOT button");
-    display.println("5 seconds to set");
-    display.println("House & Location");
+    if (!enrolled) {
+      display.println("Not registered");
+      display.setCursor(0, 20);
+      display.println("Contact support with");
+      display.println(DEVICE_ID);
+    } else if (!claimed) {
+      display.println("Not linked yet");
+      display.setCursor(0, 20);
+      display.println("Add it at cobsci.com");
+      display.println("with the claim code");
+      display.println("on its label");
+    } else {
+      display.println("Not named yet");
+      display.setCursor(0, 20);
+      display.println("Name this room in");
+      display.println("the CO2 & You app");
+    }
     display.display();
     return;
   }
@@ -327,7 +299,15 @@ void updateDisplay() {
     unit = "%";
   }
 
-  display.println(label);
+  display.print(label);
+  if (displayName[0]) {             // room name from the portal, right-aligned
+    int16_t nx, ny; uint16_t nw, nh;
+    String name = String(displayName).substring(0, 12);
+    display.getTextBounds(name, 0, 0, &nx, &ny, &nw, &nh);
+    display.setCursor(SCREEN_WIDTH - nw, 0);
+    display.print(name);
+  }
+  display.println();
 
   display.setTextSize(4);
   int16_t x1, y1;
@@ -393,7 +373,7 @@ void handleRoot() {
   } else {
     html += "<p>No readings yet.</p>";
   }
-  html += "<p>House: <b>" + String(houseId) + "</b> &nbsp; Location: <b>" + String(locationId) + "</b></p>";
+  html += "<p>Name: <b>" + String(displayName[0] ? displayName : "not named yet") + "</b> &nbsp; (rename it in the CO2 &amp; You app)</p>";
   html += "<p style='color:#888;font-size:0.8em'>" + String(DEVICE_ID) + " &middot; firmware v" + String(FW_VERSION) + "</p>";
   html += "</body></html>";
   server.send(200, "text/html", html);
@@ -412,57 +392,171 @@ void handleCSV() {
   server.send(200, "text/csv", csv);
 }
 
-//Begin jcobb changes
-void sendToInflux() {
-  if (WiFi.status() != WL_CONNECTED || readingCount == 0) return;
+// ================= Platform API =================
+// Device secret: 32 random bytes from the hardware RNG, made once and kept in NVS (survives
+// OTA updates and reboots; erased only by a full flash erase). Printed on the serial console
+// until the server accepts it, so the factory station can record it at provisioning.
+void loadDeviceSecret() {
+  devPrefs.begin("device", false);
+  String s = devPrefs.getString("secret", "");
+  if (s.length() != 64) {
+    uint8_t raw[32];
+    esp_fill_random(raw, sizeof(raw));
+    char hex[65];
+    for (int i = 0; i < 32; i++) sprintf(hex + i * 2, "%02x", raw[i]);
+    hex[64] = '\0';
+    s = hex;
+    devPrefs.putString("secret", s);
+    devPrefs.putBool("enrolled", false);
+  }
+  strlcpy(deviceSecret, s.c_str(), sizeof(deviceSecret));
+  enrolled = devPrefs.getBool("enrolled", false);
+  claimed = devPrefs.getBool("claimed", false);
+  String n = devPrefs.getString("name", "");
+  strlcpy(displayName, n.c_str(), sizeof(displayName));
+  if (!enrolled) Serial.printf("PROVISION: %s %s\n", DEVICE_ID, deviceSecret);
+}
 
-  // Build a batch of every buffered reading not yet sent, oldest first
+void hmacSha256Hex(const char* keyHex, const String& msg, char out[65]) {
+  uint8_t key[32];
+  for (int i = 0; i < 32; i++) {
+    char b[3] = { keyHex[i * 2], keyHex[i * 2 + 1], 0 };
+    key[i] = (uint8_t)strtoul(b, nullptr, 16);
+  }
+  uint8_t mac[32];
+  const mbedtls_md_info_t* info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  mbedtls_md_hmac(info, key, sizeof(key), (const uint8_t*)msg.c_str(), msg.length(), mac);
+  for (int i = 0; i < 32; i++) sprintf(out + i * 2, "%02x", mac[i]);
+  out[64] = '\0';
+}
+
+// Sends our secret once, over HTTPS, so the server can verify signed uploads.
+// 404 = this DEVICE_ID isn't registered yet (staff see it under "Unknown devices").
+void enrollWithServer() {
+  if (enrolled || WiFi.status() != WL_CONNECTED) return;
+  WiFiClientSecure client;
+  client.useBuiltinCACertBundle();
+  HTTPClient http;
+  http.begin(client, String(API_BASE) + "/api/device/enroll");
+  http.setTimeout(10000);
+  http.addHeader("Content-Type", "application/json");
+  JsonDocument doc;
+  doc["device_id"] = DEVICE_ID;
+  doc["secret"] = deviceSecret;
+  doc["fw"] = FW_VERSION;
+  if (legacyLocation[0]) doc["legacy_location"] = legacyLocation;
   String body;
+  serializeJson(doc, body);
+  int code = http.POST(body);
+  if (code == 200) {
+    enrolled = true;
+    devPrefs.putBool("enrolled", true);
+    Serial.println("API: enrolled");
+  } else {
+    Serial.printf("API: enroll failed (%d) %s\n", code, http.getString().c_str());
+  }
+  http.end();
+}
+
+// Uploads every buffered reading not yet confirmed, oldest first, signed with our secret:
+//   X-Signature = hex HMAC-SHA256(secret, DEVICE_ID + "\n" + X-Timestamp + "\n" + body)
+// The reply carries the name customers gave this device in the portal and, when staff have
+// rolled out a newer build to it, an OTA offer.
+void sendReadings() {
+  if (WiFi.status() != WL_CONNECTED || readingCount == 0) return;
+  if (!enrolled) {
+    enrollWithServer();
+    if (!enrolled) return;
+  }
+
+  String body = "{\"fw\":" + String(FW_VERSION) + ",\"rssi\":" + String(WiFi.RSSI()) + ",\"readings\":[";
   time_t newest = lastSentTs;
+  int n = 0;
   for (int i = 0; i < readingCount; i++) {
     int idx = (writeIndex - readingCount + i + MAX_READINGS) % MAX_READINGS;
     Reading& r = history[idx];
     if (r.timestamp <= lastSentTs) continue;
-
-    // Tags (sorted by key): device_id, house_id, location_id. IDs are sanitized to a-z 0-9 '-',
-    // so they never need line-protocol escaping.
-    char line[256];
-    snprintf(line, sizeof(line),
-      "environment,device_id=%s,house_id=%s,location_id=%s co2_ppm=%di,temp_f=%.1f,humidity_pct=%.1f,fw_version=%di %lld\n",
-      DEVICE_ID, houseId, locationId, (int)r.co2, celsiusToFahrenheit(r.temp), r.hum, FW_VERSION,
-      (long long)r.timestamp);
-    body += line;
+    char item[64];
+    snprintf(item, sizeof(item), "%s[%lld,%d,%.2f,%.1f]", n ? "," : "", (long long)r.timestamp, (int)r.co2, r.temp, r.hum);
+    body += item;
     newest = r.timestamp;
+    n++;
   }
-  if (body.length() == 0) return;
+  body += "]}";
+  if (n == 0) return;
+
+  time_t now;
+  time(&now);
+  char ts[16];
+  snprintf(ts, sizeof(ts), "%lld", (long long)now);
+  char sig[65];
+  hmacSha256Hex(deviceSecret, String(DEVICE_ID) + "\n" + ts + "\n" + body, sig);
 
   WiFiClientSecure client;
-  client.setCACert(INFLUX_ROOT_CA);
-
+  client.useBuiltinCACertBundle();
   HTTPClient http;
-  String url = String(INFLUX_URL) + "/api/v2/write?org=" + INFLUX_ORG +
-               "&bucket=" + INFLUX_BUCKET + "&precision=s";
-  http.begin(client, url);
-  http.setTimeout(10000);
-  http.addHeader("Authorization", String("Token ") + INFLUX_TOKEN);
-  http.addHeader("Content-Type", "text/plain; charset=utf-8");
+  http.begin(client, String(API_BASE) + "/api/device/readings");
+  http.setTimeout(15000);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-Device-Id", DEVICE_ID);
+  http.addHeader("X-Timestamp", ts);
+  http.addHeader("X-Signature", sig);
 
   int code = http.POST(body);
-  if (code == 204) {
+  String reply = http.getString();
+  http.end();
+
+  if (code == 200) {
     lastSentTs = newest;
     prefs.putLong64("lastSent", lastSentTs);
-    Serial.println("Influx: upload OK");
+    Serial.printf("API: uploaded %d reading(s)\n", n);
     otaMarkGood();   // a successful upload is the health check for a newly installed build
+    handleServerReply(reply);
   } else {
-    Serial.printf("Influx: upload failed (%d) %s\n", code, http.getString().c_str());
+    Serial.printf("API: upload failed (%d) %s\n", code, reply.c_str());
+    if (code == 401 && reply.indexOf("\"enroll\"") >= 0) {   // staff reset our credential
+      enrolled = false;
+      devPrefs.putBool("enrolled", false);
+    }
+    if (code == 401 && reply.indexOf("bad_timestamp") >= 0) configTime(0, 0, "pool.ntp.org");
   }
-  http.end();
 }
-//End jcobb changes
+
+void handleServerReply(const String& reply) {
+  JsonDocument doc;
+  if (deserializeJson(doc, reply)) return;
+  bool isClaimed = doc["claimed"] | false;
+  const char* name = doc["name"] | "";
+  if (isClaimed != claimed) {
+    claimed = isClaimed;
+    devPrefs.putBool("claimed", claimed);
+  }
+  // The OLED font is plain ASCII: keep printable characters, turn anything else into '?'
+  char clean[NAME_MAX_LEN + 1];
+  size_t k = 0;
+  for (const unsigned char* p = (const unsigned char*)name; *p && k < NAME_MAX_LEN; p++) {
+    if (*p >= 0x80) { while ((p[1] & 0xC0) == 0x80) p++; clean[k++] = '?'; }   // skip UTF-8 continuation bytes
+    else if (*p >= 0x20) clean[k++] = *p;
+  }
+  clean[k] = '\0';
+  if (strcmp(clean, displayName) != 0) {
+    strlcpy(displayName, clean, sizeof(displayName));
+    devPrefs.putString("name", displayName);
+    Serial.printf("API: name is now \"%s\"\n", displayName);
+  }
+  JsonVariant ota = doc["ota"];
+  if (!ota.isNull()) {
+    int version = ota["version"] | 0;
+    const char* url = ota["url"] | "";
+    const char* sha = ota["sha256"] | "";
+    if (version > 0 && url[0] && strlen(sha) == 64) otaInstall(version, url, sha);
+  }
+}
+
 // ================= OTA updates =================
-// Flow: every OTA_CHECK_INTERVAL the device fetches version.txt. If it lists a higher
-// version, the .bin is written to the spare app partition and the device reboots into it
-// in "trial" mode. The new build is kept only once it uploads to InfluxDB successfully.
+// Flow: when an upload reply offers a build, the .bin is downloaded, its SHA-256 checked, and
+// it is written to the spare app partition; the device reboots into it in "trial" mode.
+// The new build is kept only once it uploads to the platform successfully.
 // If it reboots too many times or can't upload within OTA_TRIAL_TIMEOUT, the device
 // switches back to the previous build and remembers not to install that version again.
 
@@ -507,43 +601,17 @@ void otaRollback(const char* why) {
   Serial.println("OTA: no previous build to roll back to; staying on this one");
 }
 
-void otaCheckForUpdate() {
+// Downloads a build offered by the server into the spare app partition, checking its SHA-256
+// before switching to it. Forced versions may be older than the running one (a rollback).
+void otaInstall(int version, const char* url, const char* expectedSha) {
   if (otaTrial || WiFi.status() != WL_CONNECTED) return;
-  if (strstr(OTA_MANIFEST_URL, "YOUR-GITHUB-USER")) return;   // not configured yet
-
-  // 1. Fetch the manifest
-  WiFiClientSecure client;
-  client.useBuiltinCACertBundle();
-  HTTPClient http;
-  http.begin(client, OTA_MANIFEST_URL);
-  http.setTimeout(10000);
-  int code = http.GET();
-  if (code != 200) {
-    Serial.printf("OTA: manifest fetch failed (%d)\n", code);
-    http.end();
-    return;
-  }
-  String body = http.getString();
-  http.end();
-
-  body.trim();
-  int nl = body.indexOf('\n');
-  if (nl < 0) {
-    Serial.println("OTA: manifest format not recognized");
-    return;
-  }
-  int remote = body.substring(0, nl).toInt();
-  String binUrl = body.substring(nl + 1);
-  binUrl.trim();
-
-  Serial.printf("OTA: running v%d, available v%d\n", FW_VERSION, remote);
-  if (remote <= FW_VERSION) return;
-  if (remote == otaPrefs.getInt("badVer", 0)) {
+  if (version == FW_VERSION) return;
+  if (version == otaPrefs.getInt("badVer", 0)) {
     Serial.println("OTA: that version was rolled back before; skipping");
     return;
   }
+  Serial.printf("OTA: running v%d, server offers v%d\n", FW_VERSION, version);
 
-  // 2. Download and flash into the spare partition
   if (oledOK) {
     display.clearDisplay();
     display.setTextSize(2);
@@ -553,60 +621,79 @@ void otaCheckForUpdate() {
   }
   saveHistoryToFlash();
 
-  WiFiClientSecure binClient;
-  binClient.useBuiltinCACertBundle();
-  httpUpdate.rebootOnUpdate(false);
-  httpUpdate.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  t_httpUpdate_return ret = httpUpdate.update(binClient, binUrl);
-
-  if (ret == HTTP_UPDATE_OK) {
-    otaPrefs.putBool("trial", true);
-    otaPrefs.putInt("boots", 0);
-    Serial.printf("OTA: v%d installed, rebooting\n", remote);
-    delay(200);
-    ESP.restart();
-  } else {
-    Serial.printf("OTA: update failed (%d) %s\n",
-                  httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
+  WiFiClientSecure client;
+  client.useBuiltinCACertBundle();
+  HTTPClient http;
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);   // GitHub Release assets redirect
+  http.begin(client, url);
+  http.setTimeout(20000);
+  int code = http.GET();
+  int len = http.getSize();
+  if (code != 200 || len <= 0) {
+    Serial.printf("OTA: download failed (%d)\n", code);
+    http.end();
+    return;
   }
+  if (!Update.begin(len, U_FLASH)) {
+    Serial.printf("OTA: not enough space (%s)\n", Update.errorString());
+    http.end();
+    return;
+  }
+
+  mbedtls_md_context_t ctx;
+  mbedtls_md_init(&ctx);
+  mbedtls_md_setup(&ctx, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 0);
+  mbedtls_md_starts(&ctx);
+
+  WiFiClient* stream = http.getStreamPtr();
+  uint8_t buf[1024];
+  int written = 0;
+  unsigned long lastData = millis();
+  while (written < len && millis() - lastData < 20000) {
+    size_t avail = stream->available();
+    if (!avail) { delay(5); continue; }
+    int got = stream->readBytes(buf, min(avail, sizeof(buf)));
+    if (got <= 0) continue;
+    mbedtls_md_update(&ctx, buf, got);
+    if (Update.write(buf, got) != (size_t)got) break;
+    written += got;
+    lastData = millis();
+  }
+  http.end();
+
+  uint8_t digest[32];
+  mbedtls_md_finish(&ctx, digest);
+  mbedtls_md_free(&ctx);
+  char hex[65];
+  for (int i = 0; i < 32; i++) sprintf(hex + i * 2, "%02x", digest[i]);
+  hex[64] = '\0';
+
+  if (written != len || strcasecmp(hex, expectedSha) != 0) {
+    Serial.printf("OTA: rejected (got %d of %d bytes, sha %s)\n", written, len, hex);
+    Update.abort();
+    return;
+  }
+  if (!Update.end(true)) {
+    Serial.printf("OTA: finalize failed (%s)\n", Update.errorString());
+    return;
+  }
+  otaPrefs.putBool("trial", true);
+  otaPrefs.putInt("boots", 0);
+  Serial.printf("OTA: v%d installed and verified, rebooting\n", version);
+  delay(200);
+  ESP.restart();
 }
 
-// ================= Device setup: QR code, WiFi, House ID / Location ID =================
+// ================= Device setup: QR code, WiFi =================
 // First boot (or after holding BOOT for 5 s): the device opens its own setup network and
 // shows a QR code on the OLED. Scanning it with a phone camera joins that network, and the
-// phone pops up the setup page: pick home WiFi, enter House ID and Location ID, Save.
+// phone pops up the setup page: pick home WiFi, Save. Naming happens in the portal.
 
 const char SETUP_HELP_HTML[] =
-  "<p><b>House ID</b> names your home, for example <i>smith-home</i>. "
-  "Use the <b>exact same</b> House ID on every CO2 &amp; You device in your home.</p>"
-  "<p><b>Location ID</b> names where this device is, for example <i>kitchen</i> or <i>bedroom-2</i>. "
-  "Each device in your home needs a <b>different</b> Location ID.</p>"
-  "<p style='color:#666;font-size:0.9em'>Letters, numbers and dashes only; capitals and spaces are "
-  "converted automatically (\"Living Room\" becomes living-room). Just renaming this device? "
-  "You can leave the WiFi fields empty.</p>";
+  "<p>Choose your home WiFi and enter its password. 2.4 GHz networks only.</p>"
+  "<p>Then give this sensor a room name in the <b>CO2 &amp; You</b> app at cobsci.com.</p>";
 
 WiFiManagerParameter paramHelp(SETUP_HELP_HTML);
-WiFiManagerParameter paramHouse("house_id", "House ID", "", ID_MAX_LEN, "required placeholder='e.g. smith-home'");
-WiFiManagerParameter paramLocation("location_id", "Location ID", "", ID_MAX_LEN, "required placeholder='e.g. kitchen'");
-
-bool idsAssigned() {
-  return strcmp(houseId, "unassigned") != 0 && strcmp(locationId, "unassigned") != 0;
-}
-
-// Lowercase; letters and digits kept; spaces, '_' and '.' become '-'; everything else dropped.
-// Keeps IDs consistent across devices ("Smith Home" == "smith home") and safe for InfluxDB tags,
-// HTML and mDNS hostnames.
-void sanitizeId(const char* in, char* out, size_t outSize) {
-  size_t n = 0;
-  bool lastDash = true;   // suppresses leading dashes
-  for (const char* p = in; *p && n < outSize - 1; p++) {
-    char c = tolower((unsigned char)*p);
-    if (isalnum((unsigned char)c)) { out[n++] = c; lastDash = false; }
-    else if ((c == ' ' || c == '-' || c == '_' || c == '.') && !lastDash) { out[n++] = '-'; lastDash = true; }
-  }
-  while (n > 0 && out[n - 1] == '-') n--;
-  out[n] = '\0';
-}
 
 void loadSetupSettings() {
   setupPrefs.begin("setup", false);
@@ -623,20 +710,9 @@ void loadSetupSettings() {
   }
   strlcpy(apPassword, pw.c_str(), sizeof(apPassword));
 
-  String h = setupPrefs.getString("house", "");
+  // Location typed into the old setup page, if any: offered to the portal as a room name.
   String l = setupPrefs.getString("loc", "");
-  if (h.length()) strlcpy(houseId, h.c_str(), sizeof(houseId));
-  if (l.length()) strlcpy(locationId, l.c_str(), sizeof(locationId));
-  Serial.printf("House ID: %s  Location ID: %s\n", houseId, locationId);
-}
-
-void saveIdsFromPortal() {
-  char h[ID_MAX_LEN + 1], l[ID_MAX_LEN + 1];
-  sanitizeId(paramHouse.getValue(), h, sizeof(h));
-  sanitizeId(paramLocation.getValue(), l, sizeof(l));
-  if (h[0]) { strlcpy(houseId, h, sizeof(houseId)); setupPrefs.putString("house", houseId); }
-  if (l[0]) { strlcpy(locationId, l, sizeof(locationId)); setupPrefs.putString("loc", locationId); }
-  Serial.printf("Saved House ID: %s  Location ID: %s\n", houseId, locationId);
+  if (l.length() && l != "unassigned") strlcpy(legacyLocation, l.c_str(), sizeof(legacyLocation));
 }
 
 // ---- OLED setup screens ----
@@ -704,18 +780,12 @@ void connectWiFiWithSetupPortal() {
   bool forceSetup = setupPrefs.getBool("force", false);
   if (forceSetup) setupPrefs.putBool("force", false);
 
-  paramHouse.setValue(idsAssigned() ? houseId : "", ID_MAX_LEN);
-  paramLocation.setValue(idsAssigned() ? locationId : "", ID_MAX_LEN);
-
   WiFiManager wm;
   wm.setTitle("CO2 &amp; You Setup");
   std::vector<const char*> menu = {"wifi"};
   wm.setMenu(menu);
   wm.addParameter(&paramHelp);
-  wm.addParameter(&paramHouse);
-  wm.addParameter(&paramLocation);
-  wm.setSaveParamsCallback(saveIdsFromPortal);
-  wm.setBreakAfterConfig(true);        // close the portal after Save even if WiFi was left blank
+  wm.setBreakAfterConfig(true);        // close the portal after Save
   wm.setConfigPortalBlocking(false);   // lets the OLED alternate screens while waiting
   if (otaTrial) wm.setConfigPortalTimeout(120);  // new build can't get online -> restart -> counts toward rollback
 
@@ -725,8 +795,6 @@ void connectWiFiWithSetupPortal() {
     wm.startConfigPortal(apName, apPassword);
     connected = false;
   } else {
-    // Devices that already have WiFi but no IDs (e.g. updated over the air) keep running;
-    // they show a "Not named yet" reminder instead of blocking on the portal.
     connected = wm.autoConnect(apName, apPassword);
   }
 
@@ -743,7 +811,7 @@ void connectWiFiWithSetupPortal() {
       if (WiFi.status() == WL_CONNECTED) {
         showMessage("Setup complete!", "Connected to WiFi");
         delay(2000);
-        if (forceSetup) {           // reboot so new names (and hostname) take effect cleanly
+        if (forceSetup) {           // reboot so the new WiFi settings take effect cleanly
           saveHistoryToFlash();
           ESP.restart();
         }
@@ -764,7 +832,7 @@ void connectWiFiWithSetupPortal() {
   }
 }
 
-// Hold BOOT for 5 s while running to reopen setup (new WiFi or new names).
+// Hold BOOT for 5 s while running to reopen setup (new WiFi).
 // Returns true while it is drawing on the OLED.
 bool checkSetupButton() {
   if (digitalRead(SETUP_BUTTON_PIN) != LOW) {
