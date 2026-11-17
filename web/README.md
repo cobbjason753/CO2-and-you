@@ -77,9 +77,11 @@ Tests: `npm test` (backend logic against a `cobsci_test` database) and
 | Every-15-minute jobs | **GitHub Actions** | Free on public repositories. |
 | Domain | cobsci.com | Already owned. |
 
-1. **Neon**: create a project, copy the *pooled* connection string.
+1. **Neon**: project `co2-and-you` (`cold-rice-78953830`, AWS US East 1) is created and its tables are in place.
+   Its connection strings are in `web/.env` (not committed): `DATABASE_URL` is the pooled one the app uses,
+   `DATABASE_URL_UNPOOLED` the direct one migrations use. You can also copy them from the Neon console › Connect.
 2. **Vercel**: import this GitHub repo, set **Root Directory = `web`**, and add environment variables:
-   `DATABASE_URL`, `APP_SECRET` (`node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`),
+   `DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `APP_SECRET` (`node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`),
    `APP_URL=https://app.cobsci.com`, `CRON_SECRET` (another random string), `SUPPORT_EMAIL`, `EMAIL_FROM`.
 3. Create the tables and your admin account from your machine:
    ```bash

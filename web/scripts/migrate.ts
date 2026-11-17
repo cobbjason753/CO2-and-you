@@ -3,6 +3,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { loadEnv } from './load-env'
 loadEnv()
+// Schema changes go over a direct connection when one is configured (Neon: the non-pooler URL).
+if (process.env.DATABASE_URL_UNPOOLED) process.env.DATABASE_URL = process.env.DATABASE_URL_UNPOOLED
 const { pool } = await import('../src/lib/db')
 
 export async function migrate(log = true) {
