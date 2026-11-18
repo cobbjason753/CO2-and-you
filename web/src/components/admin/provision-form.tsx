@@ -21,6 +21,7 @@ export function LabelSheet({ labels }: { labels: Label[] }) {
             <div className="w-20 shrink-0 [&_svg]:h-auto [&_svg]:w-full" dangerouslySetInnerHTML={{ __html: l.qr }} />
             <div className="min-w-0 flex-1 text-[11px] leading-tight">
               <p className="font-bold">CO2 &amp; You</p>
+              <p className="text-[9px]">by CobSci · app.cobsci.com</p>
               <p className="mt-1">Claim code</p>
               <p className="font-mono text-sm font-bold tracking-wide">{l.claimCode}</p>
               <div className="mt-1 [&_svg]:h-10 [&_svg]:w-full" dangerouslySetInnerHTML={{ __html: l.barcode }} />

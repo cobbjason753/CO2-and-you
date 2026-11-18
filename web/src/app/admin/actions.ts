@@ -241,7 +241,7 @@ export async function resendWelcome(_: FormState, d: FormData): Promise<FormStat
     const raw = randomToken(32)
     const kind = u.password_hash ? 'reset_password' : 'set_password'
     await q(`INSERT INTO tokens (id_hash, kind, user_id, expires_at) VALUES ($1,$2,$3, now() + interval '7 days')`, [sha256(raw), kind, u.id])
-    await sendEmail(u.email, kind === 'set_password' ? 'Set your CO2 & You password' : 'Reset your CO2 & You password', 'Your sign-in link', [
+    await sendEmail(u.email, kind === 'set_password' ? 'Set your CobSci password' : 'Reset your CobSci password', 'Your sign-in link', [
       { p: 'Our support team sent you this link to get into your account. It works for 7 days.' },
       { button: { label: kind === 'set_password' ? 'Set password' : 'Choose a new password', url: `${env.appUrl()}/${kind === 'set_password' ? 'set-password' : 'reset'}/${raw}` } },
     ], 'support_link')

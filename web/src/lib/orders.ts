@@ -140,7 +140,7 @@ export async function markShipped(orderId: string, tracking: string) {
       return sendEmail(
         user.email,
         'Your CO2 & You sensors are on the way',
-        'Welcome to CO2 & You',
+        'Welcome to CobSci',
         [
           { p: `${from}Your ${units} shipped today. ${trackLine}` },
           { p: 'Set a password now so your readings are waiting for you when you plug in.' },

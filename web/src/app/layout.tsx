@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: { default: 'CO2 & You', template: '%s · CO2 & You' },
-  description: 'Indoor air quality, room by room.',
+  title: { default: 'CobSci', template: '%s · CobSci' },
+  description: 'Indoor air quality, room by room, from your CO2 & You sensors.',
 }
 
 export const viewport: Viewport = {

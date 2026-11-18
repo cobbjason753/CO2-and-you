@@ -33,9 +33,9 @@ export default async function PortalLayout({ children }: { children: React.React
     <div className="pb-24 md:pb-10">
       <header className="no-print sticky top-0 z-20 border-b border-line bg-surface/95 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-2.5">
-          <Link href="/app" className="flex items-center gap-1.5 font-bold text-brand" aria-label="CO2 & You home">
+          <Link href="/app" className="flex items-center gap-1.5 font-bold text-brand" aria-label="CobSci home">
             <Logo size={26} />
-            <span className="hidden sm:inline">CO2 &amp; You</span>
+            <span className="hidden sm:inline">CobSci</span>
           </Link>
           <div className="min-w-0 flex-1 md:flex-none">{house && <HouseSwitcher houses={houses} current={house.id} action={switchHouse} />}</div>
           <div className="flex-1 max-md:hidden">

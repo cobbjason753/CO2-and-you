@@ -19,7 +19,7 @@ export async function GET() {
   )
   const files: Record<string, Uint8Array> = {
     'README.txt': strToU8(
-      `CO2 & You data export for ${user.email}\nCreated ${new Date().toISOString()}\n\nprofile.json      your account\nhouses.json       houses you belong to, with rooms, devices, alert rules and alert history\nreadings-<HOUSE_ID>.csv   every reading recorded in that house (UTC)\norders.json       your orders\nsupport.json      messages you sent to support\n`,
+      `CobSci data export for ${user.email}\nCreated ${new Date().toISOString()}\n\nprofile.json      your account\nhouses.json       houses you belong to, with rooms, devices, alert rules and alert history\nreadings-<HOUSE_ID>.csv   every reading recorded in that house (UTC)\norders.json       your orders\nsupport.json      messages you sent to support\n`,
     ),
     'profile.json': strToU8(JSON.stringify(profile[0], null, 2)),
   }
