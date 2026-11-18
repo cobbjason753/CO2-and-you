@@ -91,7 +91,7 @@ export function newTotpSecret(): string {
 }
 
 export function totpFor(email: string, secretB32: string) {
-  return new TOTP({ issuer: 'CO2 & You', label: email, algorithm: 'SHA1', digits: 6, period: 30, secret: Secret.fromBase32(secretB32) })
+  return new TOTP({ issuer: 'CobSci', label: email, algorithm: 'SHA1', digits: 6, period: 30, secret: Secret.fromBase32(secretB32) })
 }
 
 export function checkTotp(email: string, secretB32: string, code: string): boolean {

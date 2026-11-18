@@ -212,7 +212,7 @@ export async function invite(_: FormState, d: FormData): Promise<FormState> {
       email,
       JSON.stringify({ house_id: house.id, invited_by: user.id }),
     ])
-    await sendEmail(email, `${user.name || user.email} invited you to CO2 & You`, `Join ${house.name}`, [
+    await sendEmail(email, `${user.name || user.email} invited you to CobSci`, `Join ${house.name}`, [
       { p: `${user.name || user.email} invited you to see indoor air quality for ${house.name}. You'll be able to view rooms, history and reports.` },
       { button: { label: 'Accept invite', url: `${env.appUrl()}/invite/${raw}` } },
       { small: 'This invite works for 14 days.' },

@@ -15,7 +15,7 @@ export async function PasswordTokenForm({ token, welcome }: { token: string; wel
     )
   return (
     <>
-      <h1 className="mb-1 text-xl font-bold">{welcome ? 'Welcome to CO2 & You' : 'Choose a new password'}</h1>
+      <h1 className="mb-1 text-xl font-bold">{welcome ? 'Welcome to CobSci' : 'Choose a new password'}</h1>
       <p className="mb-5 text-sm text-muted">Signing in as <b>{t.email}</b></p>
       <ActionForm action={setPassword} submit={welcome ? 'Create account' : 'Save password'} className="space-y-4 [&_button]:w-full">
         <input type="hidden" name="token" value={token} />

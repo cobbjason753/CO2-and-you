@@ -51,7 +51,7 @@ export async function forgot(_: FormState, d: FormData): Promise<FormState> {
   if (!user) return done
   const raw = randomToken(32)
   await q(`INSERT INTO tokens (id_hash, kind, user_id, expires_at) VALUES ($1,'reset_password',$2, now() + interval '1 hour')`, [sha256(raw), user.id])
-  await sendEmail(email, 'Reset your CO2 & You password', 'Reset your password', [
+  await sendEmail(email, 'Reset your CobSci password', 'Reset your password', [
     { p: 'Someone (hopefully you) asked to reset your password. This link works for 1 hour.' },
     { button: { label: 'Choose a new password', url: `${env.appUrl()}/reset/${raw}` } },
     { small: "If you didn't ask for this, you can ignore this email." },

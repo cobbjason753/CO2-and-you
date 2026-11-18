@@ -1,4 +1,4 @@
-# CO2 & You platform (customer portal + admin)
+# CobSci platform for CO2 & You sensors (customer portal + admin)
 
 The backend API, the customer portal and the staff admin area from the *Website & Platform
 Spec*, as one Next.js app. Devices, browsers and staff all go through it; nothing else

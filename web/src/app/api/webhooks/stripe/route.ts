@@ -121,8 +121,8 @@ export async function POST(req: Request) {
         await upsertSubscription({ id: subId, userId: null, status: 'past_due' })
         const u = await one<{ email: string }>('SELECT u.email FROM subscriptions s JOIN users u ON u.id = s.user_id WHERE s.id = $1', [subId])
         if (u)
-          await sendEmail(u.email, 'Your CO2 & You payment didn’t go through', 'Payment problem', [
-            { p: "We couldn't charge your card for your CO2 & You subscription. Your sensors keep working while you update it." },
+          await sendEmail(u.email, 'Your CobSci payment didn’t go through', 'Payment problem', [
+            { p: "We couldn't charge your card for your CobSci subscription. Your sensors keep working while you update it." },
             { button: { label: 'Update payment method', url: `${env.appUrl()}/app/account#billing` } },
           ], 'billing')
       }

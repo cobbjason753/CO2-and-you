@@ -1,4 +1,6 @@
-# CO2 & You
+# CobSci · CO2 & You
+
+CobSci is the company; CO2 & You is the sensor. Customers manage their sensors in the CobSci portal at https://app.cobsci.com.
 
 | Folder | What |
 |---|---|
