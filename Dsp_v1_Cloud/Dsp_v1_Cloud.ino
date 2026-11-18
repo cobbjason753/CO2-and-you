@@ -27,7 +27,7 @@ char apName[20];
 char apPassword[12];
 #include <qrcode.h>          // QR generator built into the ESP32 core (ESP-IDF)
 
-// The device's name now comes from the CO2 & You portal: the customer names the room there
+// The device's name now comes from the CobSci portal: the customer names the room there
 // and the server returns it with every upload. Kept in NVS so it shows straight after a reboot.
 // (Earlier firmware asked for a House ID and Location ID on the setup page; an old Location ID
 //  is sent once at enrollment so the portal can pre-fill the room name.)
@@ -41,13 +41,21 @@ const int SETUP_BUTTON_PIN = 0;                   // BOOT button on ESP32-S3 dev
 const unsigned long SETUP_HOLD_MS = 5000;         // hold this long to reopen setup
 unsigned long setupButtonDownSince = 0;
 
-// ---- CO2 & You platform API ----
+// ---- CobSci platform API ----
 // Every reading goes to our backend, signed with this device's own secret. No shared
 // credentials live in the firmware, and one unit can be revoked without touching the rest.
 const char* API_BASE = "https://app.cobsci.com";
 char DEVICE_ID[20];        // filled in at startup with the chip's unique ID (esp32-<MAC>)
 char deviceSecret[65];     // 32 random bytes as hex, generated on first boot, kept in NVS
 bool enrolled = false;     // server has accepted our secret
+bool serverAnswered = false;   // an upload has succeeded at least once, so claimed/name are known
+int lastEnrollCode = 0;        // HTTP status of the last enroll attempt (404 = not registered)
+unsigned long lastEnrollAttempt = 0;
+bool uploadPending = false;    // readings waiting for a successful upload
+unsigned long lastUploadAttempt = 0;
+const unsigned long API_TIMEOUT_MS   = 30000;   // first request after idle wakes the server and database
+const unsigned long ENROLL_RETRY_MS  = 60000;   // retry enrollment every minute until accepted
+const unsigned long UPLOAD_RETRY_MS  = 60000;   // retry a failed upload after a minute, not at the next sample
 Preferences devPrefs;
 // TLS: the core's built-in Mozilla root bundle validates the server certificate
 // (needs ESP32 core 3.3.12+), so a certificate renewal or CA change needs no firmware update.
@@ -96,6 +104,9 @@ int readingCount = 0;
 int writeIndex = 0;
 
 unsigned long lastSampleTime = 0;
+unsigned long lastSampleAttempt = 0;
+const unsigned long FIRST_SAMPLE_MS = 30UL * 1000UL;   // first reading ~30 s after start-up
+const unsigned long SAMPLE_RETRY_MS = 5UL * 1000UL;    // sensor not ready: try again shortly
 const unsigned long sampleInterval = 5UL * 60UL * 1000UL; // 5 min 
 //const unsigned long sampleInterval = 30UL * 1000UL; // TEMP for testing 30Second interval
 
@@ -198,14 +209,18 @@ void setup() {
   Serial.println("CP10: server started");
 
   enrollWithServer();
+  // Take the first reading soon after start-up instead of a full interval later
+  // (unsigned arithmetic, so this is safe even right after boot).
+  lastSampleTime = millis() - sampleInterval + FIRST_SAMPLE_MS;
 }
 
 void loop() {
   server.handleClient();
 
-  if (sensorOK && millis() - lastSampleTime >= sampleInterval) {
-    lastSampleTime = millis();
+  if (sensorOK && millis() - lastSampleTime >= sampleInterval && millis() - lastSampleAttempt >= SAMPLE_RETRY_MS) {
+    lastSampleAttempt = millis();
     if (mySensor.readMeasurement()) {
+      lastSampleTime = millis();
       time_t now;
       time(&now);
       history[writeIndex].timestamp = now;
@@ -219,6 +234,9 @@ void loop() {
       sendReadings();
     }
   }
+
+  if (!enrolled && millis() - lastEnrollAttempt >= ENROLL_RETRY_MS) enrollWithServer();
+  if (uploadPending && millis() - lastUploadAttempt >= UPLOAD_RETRY_MS) sendReadings();
 
   if (millis() - lastDisplaySwitch >= displayInterval) {
     lastDisplaySwitch = millis();
@@ -249,11 +267,18 @@ void updateDisplay() {
   }
 
   if (displayMode == 3) {
-    if (!enrolled) {
+    if (lastEnrollCode == 404) {
       display.println("Not registered");
       display.setCursor(0, 20);
       display.println("Contact support with");
       display.println(DEVICE_ID);
+    } else if (!serverAnswered) {
+      // Until the server has replied once we don't know whether this unit is linked or named.
+      display.println("Connecting...");
+      display.setCursor(0, 20);
+      display.println("Sending first");
+      display.println("readings to");
+      display.println("CobSci");
     } else if (!claimed) {
       display.println("Not linked yet");
       display.setCursor(0, 20);
@@ -264,7 +289,7 @@ void updateDisplay() {
       display.println("Not named yet");
       display.setCursor(0, 20);
       display.println("Name this room in");
-      display.println("the CO2 & You app");
+      display.println("the CobSci app");
     }
     display.display();
     return;
@@ -373,7 +398,7 @@ void handleRoot() {
   } else {
     html += "<p>No readings yet.</p>";
   }
-  html += "<p>Name: <b>" + String(displayName[0] ? displayName : "not named yet") + "</b> &nbsp; (rename it in the CO2 &amp; You app)</p>";
+  html += "<p>Name: <b>" + String(displayName[0] ? displayName : "not named yet") + "</b> &nbsp; (rename it in the CobSci app at app.cobsci.com)</p>";
   html += "<p style='color:#888;font-size:0.8em'>" + String(DEVICE_ID) + " &middot; firmware v" + String(FW_VERSION) + "</p>";
   html += "</body></html>";
   server.send(200, "text/html", html);
@@ -412,6 +437,7 @@ void loadDeviceSecret() {
   strlcpy(deviceSecret, s.c_str(), sizeof(deviceSecret));
   enrolled = devPrefs.getBool("enrolled", false);
   claimed = devPrefs.getBool("claimed", false);
+  serverAnswered = devPrefs.getBool("answered", false);
   String n = devPrefs.getString("name", "");
   strlcpy(displayName, n.c_str(), sizeof(displayName));
   if (!enrolled) Serial.printf("PROVISION: %s %s\n", DEVICE_ID, deviceSecret);
@@ -433,12 +459,17 @@ void hmacSha256Hex(const char* keyHex, const String& msg, char out[65]) {
 // Sends our secret once, over HTTPS, so the server can verify signed uploads.
 // 404 = this DEVICE_ID isn't registered yet (staff see it under "Unknown devices").
 void enrollWithServer() {
-  if (enrolled || WiFi.status() != WL_CONNECTED) return;
+  if (enrolled) return;
+  lastEnrollAttempt = millis();
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("API: enroll skipped (WiFi not connected)");
+    return;
+  }
   WiFiClientSecure client;
   client.useBuiltinCACertBundle();
   HTTPClient http;
   http.begin(client, String(API_BASE) + "/api/device/enroll");
-  http.setTimeout(10000);
+  http.setTimeout(API_TIMEOUT_MS);
   http.addHeader("Content-Type", "application/json");
   JsonDocument doc;
   doc["device_id"] = DEVICE_ID;
@@ -448,6 +479,7 @@ void enrollWithServer() {
   String body;
   serializeJson(doc, body);
   int code = http.POST(body);
+  lastEnrollCode = code;
   if (code == 200) {
     enrolled = true;
     devPrefs.putBool("enrolled", true);
@@ -463,10 +495,19 @@ void enrollWithServer() {
 // The reply carries the name customers gave this device in the portal and, when staff have
 // rolled out a newer build to it, an OTA offer.
 void sendReadings() {
-  if (WiFi.status() != WL_CONNECTED || readingCount == 0) return;
+  lastUploadAttempt = millis();
+  uploadPending = readingCount > 0;
+  if (!uploadPending) return;
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("API: upload skipped (WiFi not connected); will retry");
+    return;
+  }
   if (!enrolled) {
     enrollWithServer();
-    if (!enrolled) return;
+    if (!enrolled) {
+      Serial.println("API: upload skipped (not enrolled yet); will retry");
+      return;
+    }
   }
 
   String body = "{\"fw\":" + String(FW_VERSION) + ",\"rssi\":" + String(WiFi.RSSI()) + ",\"readings\":[";
@@ -483,7 +524,10 @@ void sendReadings() {
     n++;
   }
   body += "]}";
-  if (n == 0) return;
+  if (n == 0) {
+    uploadPending = false;
+    return;
+  }
 
   time_t now;
   time(&now);
@@ -496,7 +540,7 @@ void sendReadings() {
   client.useBuiltinCACertBundle();
   HTTPClient http;
   http.begin(client, String(API_BASE) + "/api/device/readings");
-  http.setTimeout(15000);
+  http.setTimeout(API_TIMEOUT_MS);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-Device-Id", DEVICE_ID);
   http.addHeader("X-Timestamp", ts);
@@ -507,13 +551,14 @@ void sendReadings() {
   http.end();
 
   if (code == 200) {
+    uploadPending = false;
     lastSentTs = newest;
     prefs.putLong64("lastSent", lastSentTs);
     Serial.printf("API: uploaded %d reading(s)\n", n);
     otaMarkGood();   // a successful upload is the health check for a newly installed build
     handleServerReply(reply);
   } else {
-    Serial.printf("API: upload failed (%d) %s\n", code, reply.c_str());
+    Serial.printf("API: upload failed (%d) %s; will retry\n", code, reply.c_str());
     if (code == 401 && reply.indexOf("\"enroll\"") >= 0) {   // staff reset our credential
       enrolled = false;
       devPrefs.putBool("enrolled", false);
@@ -525,6 +570,10 @@ void sendReadings() {
 void handleServerReply(const String& reply) {
   JsonDocument doc;
   if (deserializeJson(doc, reply)) return;
+  if (!serverAnswered) {
+    serverAnswered = true;
+    devPrefs.putBool("answered", true);
+  }
   bool isClaimed = doc["claimed"] | false;
   const char* name = doc["name"] | "";
   if (isClaimed != claimed) {
@@ -691,7 +740,7 @@ void otaInstall(int version, const char* url, const char* expectedSha) {
 
 const char SETUP_HELP_HTML[] =
   "<p>Choose your home WiFi and enter its password. 2.4 GHz networks only.</p>"
-  "<p>Then give this sensor a room name in the <b>CO2 &amp; You</b> app at cobsci.com.</p>";
+  "<p>Then give this sensor a room name in the <b>CobSci</b> app at app.cobsci.com.</p>";
 
 WiFiManagerParameter paramHelp(SETUP_HELP_HTML);
 

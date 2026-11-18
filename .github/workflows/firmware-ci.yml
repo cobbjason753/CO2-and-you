@@ -1,0 +1,33 @@
+# Compiles the firmware on every push that touches it, so a tag never meets a broken build.
+# Publishes nothing; releases still come only from v<N> tags (release.yml).
+name: Firmware build check
+
+on:
+  push:
+    branches-ignore: [gh-pages]
+    paths: ['Dsp_v1_Cloud/**', '.github/workflows/firmware-ci.yml']
+  pull_request:
+    paths: ['Dsp_v1_Cloud/**']
+
+env:
+  SKETCH: Dsp_v1_Cloud
+  ESP32_CORE: esp32:esp32@3.3.12
+  FQBN: esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install ESP32 core and libraries
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install "$ESP32_CORE"
+          arduino-cli lib install "WiFiManager" "Adafruit SSD1306" "Adafruit GFX Library" "SparkFun SCD4x Arduino Library" "ArduinoJson"
+      - name: Compile
+        run: arduino-cli compile --fqbn "$FQBN" --warnings default --output-dir build "$SKETCH"
+      - name: Size
+        run: ls -l build/*.bin
