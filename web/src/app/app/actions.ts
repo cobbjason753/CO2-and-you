@@ -90,6 +90,18 @@ export async function moveDevice(_: FormState, d: FormData): Promise<FormState> 
   }, '/app')
 }
 
+/** Owner turns a sensor's screen and LED on or off. Reaches the sensor with its next upload. */
+export async function setDisplay(_: FormState, d: FormData): Promise<FormState> {
+  return run(async () => {
+    const { house, user } = await requireHouse({ owner: true })
+    const dev = await ownedDevice(house.id, str(d, 'device'))
+    const on = str(d, 'on') === 'true'
+    await q('UPDATE devices SET display_on = $2 WHERE id = $1', [dev.id, on])
+    await audit(user, 'device.display', { type: 'device', id: dev.id }, { on })
+    return on ? 'Screen and light on. The sensor updates within 5 minutes.' : 'Screen and light off. The sensor updates within 5 minutes.'
+  }, '/app/devices')
+}
+
 export async function removeDevice(_: FormState, d: FormData): Promise<FormState> {
   return run(async () => {
     const { house, user } = await requireHouse({ owner: true })

@@ -3,7 +3,8 @@ import { q } from '@/lib/db'
 import { timeAgo, isOnline, signalBars } from '@/lib/units'
 import { Card, PageHeader, Field, Input, Select, Badge, SignalBars, Notice, Empty } from '@/components/ui'
 import { ActionForm } from '@/components/forms'
-import { nameDevice, moveDevice, removeDevice, claim, renameRoom, deleteRoom } from '../actions'
+import { ToggleSwitch } from '@/components/portal/toggle'
+import { nameDevice, moveDevice, removeDevice, claim, renameRoom, deleteRoom, setDisplay } from '../actions'
 
 export const metadata = { title: 'Devices' }
 
@@ -12,7 +13,7 @@ export default async function DevicesPage({ searchParams }: { searchParams: Prom
   const { house } = await requireHouse()
   const isOwner = house.role === 'owner'
   const devices = await q<any>(
-    `SELECT d.id, d.room_id, r.name AS room, d.fw_version, d.last_rssi, d.last_seen_at, d.assigned_at
+    `SELECT d.id, d.room_id, r.name AS room, d.fw_version, d.last_rssi, d.last_seen_at, d.assigned_at, d.display_on
        FROM devices d LEFT JOIN rooms r ON r.id = d.room_id
       WHERE d.house_id = $1 ORDER BY r.name NULLS FIRST, d.id`,
     [house.id],
@@ -59,6 +60,17 @@ export default async function DevicesPage({ searchParams }: { searchParams: Prom
                   <dd>{timeAgo(d.last_seen_at)}</dd>
                 </div>
               </dl>
+
+              <div className="mt-3 rounded-xl bg-surface-2 px-3 py-2.5">
+                <ToggleSwitch
+                  action={setDisplay}
+                  fields={{ device: d.id }}
+                  checked={d.display_on !== false}
+                  label="Screen & light"
+                  hint={(d.fw_version ?? 0) >= 8 ? 'Turn off for bedrooms. Readings and alerts carry on.' : 'Takes effect once this sensor has firmware v8 (it updates automatically).'}
+                  disabled={!isOwner}
+                />
+              </div>
 
               {isOwner && (
                 <div className="mt-4 space-y-3 border-t border-line pt-4">

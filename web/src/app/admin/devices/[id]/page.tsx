@@ -58,6 +58,7 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
           <dl className="grid grid-cols-2 gap-1 text-sm">
             <dt className="text-muted">Firmware</dt><dd>v{d.fw_version ?? '?'} (flashed v{d.fw_provisioned ?? '?'})</dd>
             <dt className="text-muted">Signal</dt><dd>{d.last_rssi ?? '—'} dBm</dd>
+            <dt className="text-muted">Screen &amp; light</dt><dd>{d.display_on === false ? 'off (customer setting)' : 'on'}</dd>
             <dt className="text-muted">Latest</dt><dd>{d.last_co2 ?? '—'} ppm · {fmtTemp(d.last_temp_c, 'F')}</dd>
             <dt className="text-muted">Upload errors</dt><dd>{d.ingest_errors}{d.last_error && ` (${d.last_error}, ${timeAgo(d.last_error_at)})`}</dd>
             <dt className="text-muted">Secret</dt><dd>{d.secret_set_at ? `set ${new Date(d.secret_set_at).toLocaleDateString('en-US')}` : 'not yet enrolled'}</dd>
