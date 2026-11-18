@@ -27,7 +27,7 @@ char apName[20];
 char apPassword[12];
 #include <qrcode.h>          // QR generator built into the ESP32 core (ESP-IDF)
 
-// The device's name now comes from the CO2 & You portal: the customer names the room there
+// The device's name now comes from the CobSci portal: the customer names the room there
 // and the server returns it with every upload. Kept in NVS so it shows straight after a reboot.
 // (Earlier firmware asked for a House ID and Location ID on the setup page; an old Location ID
 //  is sent once at enrollment so the portal can pre-fill the room name.)
@@ -41,7 +41,7 @@ const int SETUP_BUTTON_PIN = 0;                   // BOOT button on ESP32-S3 dev
 const unsigned long SETUP_HOLD_MS = 5000;         // hold this long to reopen setup
 unsigned long setupButtonDownSince = 0;
 
-// ---- CO2 & You platform API ----
+// ---- CobSci platform API ----
 // Every reading goes to our backend, signed with this device's own secret. No shared
 // credentials live in the firmware, and one unit can be revoked without touching the rest.
 const char* API_BASE = "https://app.cobsci.com";
@@ -278,7 +278,7 @@ void updateDisplay() {
       display.setCursor(0, 20);
       display.println("Sending first");
       display.println("readings to");
-      display.println("CO2 & You");
+      display.println("CobSci");
     } else if (!claimed) {
       display.println("Not linked yet");
       display.setCursor(0, 20);
@@ -289,7 +289,7 @@ void updateDisplay() {
       display.println("Not named yet");
       display.setCursor(0, 20);
       display.println("Name this room in");
-      display.println("the CO2 & You app");
+      display.println("the CobSci app");
     }
     display.display();
     return;
@@ -398,7 +398,7 @@ void handleRoot() {
   } else {
     html += "<p>No readings yet.</p>";
   }
-  html += "<p>Name: <b>" + String(displayName[0] ? displayName : "not named yet") + "</b> &nbsp; (rename it in the CO2 &amp; You app)</p>";
+  html += "<p>Name: <b>" + String(displayName[0] ? displayName : "not named yet") + "</b> &nbsp; (rename it in the CobSci app at app.cobsci.com)</p>";
   html += "<p style='color:#888;font-size:0.8em'>" + String(DEVICE_ID) + " &middot; firmware v" + String(FW_VERSION) + "</p>";
   html += "</body></html>";
   server.send(200, "text/html", html);
@@ -740,7 +740,7 @@ void otaInstall(int version, const char* url, const char* expectedSha) {
 
 const char SETUP_HELP_HTML[] =
   "<p>Choose your home WiFi and enter its password. 2.4 GHz networks only.</p>"
-  "<p>Then give this sensor a room name in the <b>CO2 &amp; You</b> app at cobsci.com.</p>";
+  "<p>Then give this sensor a room name in the <b>CobSci</b> app at app.cobsci.com.</p>";
 
 WiFiManagerParameter paramHelp(SETUP_HELP_HTML);
 
