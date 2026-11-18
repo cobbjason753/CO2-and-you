@@ -55,6 +55,7 @@ Reply 200:
   "received": 2,
   "claimed": true,
   "name": "Kitchen",
+  "display": true,
   "ota": { "version": 9, "url": "https://…/firmware-v9.bin", "sha256": "<64 hex>", "size": 1203456 }
 }
 ```
@@ -62,6 +63,8 @@ Reply 200:
 - `claimed: false` — the unit isn't in any house yet (gift, retail, packing error). Readings
   are acknowledged but not stored; the device should treat them as sent.
 - `name` — the room name set in the portal (`""` until named). Shown on the device screen.
+- `display` — the owner's "Screen & light" setting from the portal. `false` = turn the
+  OLED and LED off (firmware v8+; setup screens still show).
 - `ota` — `null` unless staff have a newer build for this device (pilot group, general
   release, or a forced version — which may be older, to roll back). The firmware downloads it,
   checks the SHA-256, installs it in trial mode and rolls back if it can't upload within 20 min.
