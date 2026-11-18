@@ -1,7 +1,10 @@
 # Builds the firmware and publishes it for OTA whenever you push a tag like v2, v3, v4...
 #   git tag v2 && git push origin v2
 #
-# Devices fetch https://<user>.github.io/<repo>/version.txt and install the .bin it points to.
+# Devices on firmware v8+ are updated by the CO2 & You platform: add the build in
+# Admin > Firmware (link to the GitHub Release asset this workflow creates), pilot it, then
+# release it to everyone. version.txt on GitHub Pages is still published so units running
+# the older Influx firmware (which poll it) can update onto the platform firmware.
 
 name: Release firmware
 
@@ -55,14 +58,7 @@ jobs:
           arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
           arduino-cli core update-index
           arduino-cli core install "$ESP32_CORE"
-          arduino-cli lib install "WiFiManager" "Adafruit SSD1306" "Adafruit GFX Library" "SparkFun SCD4x Arduino Library"
-
-      - name: Write secrets.h from repository secret
-        env:
-          INFLUX_TOKEN: ${{ secrets.INFLUX_TOKEN }}
-        run: |
-          if [ -z "$INFLUX_TOKEN" ]; then echo "INFLUX_TOKEN secret is not set"; exit 1; fi
-          printf '#pragma once\nconst char* INFLUX_TOKEN = "%s";\n' "$INFLUX_TOKEN" > "$SKETCH/secrets.h"
+          arduino-cli lib install "WiFiManager" "Adafruit SSD1306" "Adafruit GFX Library" "SparkFun SCD4x Arduino Library" "ArduinoJson"
 
       - name: Compile
         run: |
@@ -81,6 +77,7 @@ jobs:
           cp "build/$SKETCH.ino.bin" "site/firmware-v$V.bin"
           printf '%s\nhttps://%s.github.io/%s/firmware-v%s.bin\n' "$V" "$OWNER" "$REPO" "$V" > site/version.txt
           cat site/version.txt
+          sha256sum "site/firmware-v$V.bin"
           ls -l site
 
       - uses: actions/upload-pages-artifact@v3
