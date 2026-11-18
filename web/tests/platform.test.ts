@@ -194,3 +194,16 @@ describe('alerts and reports', () => {
     expect(rep.html).toMatch(/Unnamed device/)
   })
 })
+
+describe('screen & light setting', () => {
+  it('is on by default and follows the portal setting in the upload reply', async () => {
+    const order = await createOrder({ source: 'manual', email: 'display@example.com', deviceQty: 1 })
+    const staff = await one(`INSERT INTO users (email, role) VALUES ('s3@x.com', 'staff') RETURNING id`)
+    const d = await provisioned()
+    await scanUnit(order.orderId, d.id, staff.id)
+    await enroll(d)
+    expect((await upload(d, [[nowS() - 60, 600, 21, 40]])).body.display).toBe(true)
+    await q('UPDATE devices SET display_on = false WHERE id = $1', [d.id])
+    expect((await upload(d, [[nowS(), 610, 21, 40]])).body.display).toBe(false)
+  })
+})

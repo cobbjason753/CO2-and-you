@@ -156,6 +156,8 @@ export async function handleReadings(raw: string, h: { deviceId: string | null; 
       claimed: !!dev.house_id,
       // Shown on the device's screen; renaming in the portal reaches the device on its next upload.
       name: dev.house_id ? (dev.room_name ?? '') : '',
+      // Screen and LED on/off, set by the owner in the portal (firmware v8+).
+      display: dev.display_on !== false,
       ota,
     },
   }

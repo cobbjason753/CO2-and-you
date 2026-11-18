@@ -34,6 +34,8 @@ char apPassword[12];
 const int NAME_MAX_LEN = 40;
 char displayName[NAME_MAX_LEN + 1] = "";   // "" = not named yet
 bool claimed = false;                      // server says this device belongs to a house
+bool displayOn = true;                     // owner's "Screen & light" setting from the portal (NVS-backed)
+bool screenBlanked = false;                // OLED panel currently powered down
 char legacyLocation[33] = "";
 Preferences setupPrefs;
 
@@ -251,8 +253,29 @@ void loop() {
   delay(200);
 }
 
+// "Screen & light" off: power the OLED panel down (also avoids burn-in) until something
+// needs to be shown again. Setup screens and the button countdown wake it regardless.
+void screenSleep() {
+  if (!oledOK || screenBlanked) return;
+  display.clearDisplay();
+  display.display();
+  display.ssd1306_command(SSD1306_DISPLAYOFF);
+  screenBlanked = true;
+}
+
+void screenWake() {
+  if (!oledOK || !screenBlanked) return;
+  display.ssd1306_command(SSD1306_DISPLAYON);
+  screenBlanked = false;
+}
+
 void updateDisplay() {
   if (!oledOK) return;
+  if (!displayOn) {
+    screenSleep();
+    return;
+  }
+  screenWake();
 
   display.clearDisplay();
   display.setTextSize(1);
@@ -350,6 +373,13 @@ void updateDisplay() {
 }
 
 void updateLED() {
+  static bool ledDark = false;
+  if (!displayOn) {
+    if (!ledDark) rgbLedWrite(LED_PIN, 0, 0, 0);
+    ledDark = true;
+    return;
+  }
+  ledDark = false;
   if (!sensorOK || readingCount == 0) return;
   int lastIdx = (writeIndex - 1 + MAX_READINGS) % MAX_READINGS;
   float co2 = history[lastIdx].co2;
@@ -437,6 +467,7 @@ void loadDeviceSecret() {
   strlcpy(deviceSecret, s.c_str(), sizeof(deviceSecret));
   enrolled = devPrefs.getBool("enrolled", false);
   claimed = devPrefs.getBool("claimed", false);
+  displayOn = devPrefs.getBool("display", true);
   serverAnswered = devPrefs.getBool("answered", false);
   String n = devPrefs.getString("name", "");
   strlcpy(displayName, n.c_str(), sizeof(displayName));
@@ -580,6 +611,12 @@ void handleServerReply(const String& reply) {
     claimed = isClaimed;
     devPrefs.putBool("claimed", claimed);
   }
+  bool wantDisplay = doc["display"] | true;
+  if (wantDisplay != displayOn) {
+    displayOn = wantDisplay;
+    devPrefs.putBool("display", displayOn);
+    Serial.printf("API: screen & light %s\n", displayOn ? "on" : "off");
+  }
   // The OLED font is plain ASCII: keep printable characters, turn anything else into '?'
   char clean[NAME_MAX_LEN + 1];
   size_t k = 0;
@@ -662,6 +699,7 @@ void otaInstall(int version, const char* url, const char* expectedSha) {
   Serial.printf("OTA: running v%d, server offers v%d\n", FW_VERSION, version);
 
   if (oledOK) {
+    screenWake();
     display.clearDisplay();
     display.setTextSize(2);
     display.setCursor(0, 20);
@@ -783,6 +821,7 @@ void drawQrOnDisplay(esp_qrcode_handle_t qr) {
 
 void showSetupQrScreen() {
   if (!oledOK) return;
+  screenWake();
   // Standard WiFi QR format, understood by the iPhone and Android camera apps
   char payload[80];
   snprintf(payload, sizeof(payload), "WIFI:T:WPA;S:%s;P:%s;;", apName, apPassword);
@@ -803,6 +842,7 @@ void showSetupQrScreen() {
 
 void showSetupTextScreen() {
   if (!oledOK) return;
+  screenWake();
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
   display.setTextSize(1);
@@ -816,6 +856,7 @@ void showSetupTextScreen() {
 
 void showMessage(const char* line1, const char* line2) {
   if (!oledOK) return;
+  screenWake();
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
   display.setTextSize(1);
