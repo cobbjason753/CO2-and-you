@@ -7,6 +7,7 @@ import { co2Band, fmtTemp, timeAgo, isOnline } from '@/lib/units'
 import { Card, BandBadge, Badge, Empty, Notice, LinkButton, Field, Input, Select, bandText, cx } from '@/components/ui'
 import { ActionForm } from '@/components/forms'
 import { Sparkline } from '@/components/portal/sparkline'
+import { InstallBanner } from '@/components/portal/app-setup'
 import { nameDevice, chooseOrderHouse } from './actions'
 
 export const metadata = { title: 'Home' }
@@ -79,6 +80,7 @@ export default async function Dashboard() {
 
   return (
     <div className="space-y-4">
+      <InstallBanner />
       {orderPrompt}
       {lapsed && (
         <Notice tone="warn">
