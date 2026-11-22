@@ -9,6 +9,7 @@ CobSci is the company; CO2 & You is the sensor. Customers manage their sensors i
 | `.github/workflows/release.yml` | Tag `v<N>` → builds firmware, publishes it to GitHub Pages and a GitHub Release |
 | `.github/workflows/web-ci.yml` | Type-check, tests and build for `web/` |
 | `.github/workflows/platform-cron.yml` | Calls the platform's housekeeping endpoint every 15 minutes |
+| `docs/mobile-apps.md` | CobSci phone app: current installable app, App Store / Google Play options and requirements |
 
 ## Firmware changes for the platform
 
