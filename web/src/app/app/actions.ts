@@ -12,6 +12,8 @@ import { sendTestReport } from '@/lib/reports'
 import { billingPortalUrl } from '@/lib/billing'
 import { rateLimit } from '@/lib/ratelimit'
 import { audit } from '@/lib/audit'
+import { headers } from 'next/headers'
+import { saveSubscription, removeSubscription, pushToUsers, pushEnabled, type SubscriptionJSON } from '@/lib/push'
 import { env } from '@/lib/env'
 import { run, str, int, UserError, type FormState } from '@/lib/action'
 
@@ -393,4 +395,32 @@ export async function chooseOrderHouse(_: FormState, d: FormData): Promise<FormS
     await q(`UPDATE orders SET house_id = $3 WHERE id = $1 AND user_id = $2 AND status = 'paid' AND house_id IS NULL`, [str(d, 'order'), user.id, houseId])
     return 'Thanks — the sensors will be linked to that house when they ship.'
   }, '/app')
+}
+
+// ---------- app notifications (web push) ----------
+export async function enablePush(sub: SubscriptionJSON): Promise<FormState> {
+  return run(async () => {
+    const { user } = await requireUser()
+    if (!pushEnabled()) throw new UserError('Notifications aren’t set up on the server yet.')
+    await saveSubscription(user.id, sub, (await headers()).get('user-agent') ?? '')
+    return 'Notifications are on for this device.'
+  })
+}
+
+export async function disablePush(endpoint: string): Promise<FormState> {
+  return run(async () => {
+    const { user } = await requireUser()
+    await removeSubscription(user.id, endpoint)
+    return 'Notifications are off for this device.'
+  })
+}
+
+export async function testPush(): Promise<FormState> {
+  return run(async () => {
+    const { user } = await requireUser()
+    if (!(await rateLimit(`pushtest:${user.id}`, 5, 3600))) throw new UserError('Too many tests. Try again later.')
+    const n = await pushToUsers([user.id], { title: 'CobSci', body: 'Notifications are working. You’ll hear from us when CO2 is high or a sensor goes offline.', url: '/app/alerts', tag: 'test' })
+    if (!n) throw new UserError('Couldn’t reach this device. Turn notifications off and on again.')
+    return `Test sent to ${n} device${n === 1 ? '' : 's'}.`
+  })
 }

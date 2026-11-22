@@ -1,5 +1,6 @@
 import { q, one, type Db } from './db'
 import { sendEmail } from './email'
+import { pushToUsers } from './push'
 import { env } from './env'
 
 const HYSTERESIS_PPM = 100 // close a CO2 alert once it drops this far below the threshold
@@ -28,8 +29,8 @@ async function notify(c: Db, eventId: number, houseId: string, deviceId: string,
     c,
   )
   if (recent) return
-  const members = await q<{ email: string }>(
-    `SELECT u.email FROM house_members m JOIN users u ON u.id = m.user_id WHERE m.house_id = $1 AND u.password_hash IS NOT NULL`,
+  const members = await q<{ id: string; email: string }>(
+    `SELECT u.id, u.email FROM house_members m JOIN users u ON u.id = m.user_id WHERE m.house_id = $1 AND u.password_hash IS NOT NULL`,
     [houseId],
     c,
   )
@@ -42,6 +43,11 @@ async function notify(c: Db, eventId: number, houseId: string, deviceId: string,
       'alert',
     )
   }
+  // Phones with the CobSci app installed and notifications on also get a push notification.
+  await pushToUsers(
+    members.map((m) => m.id),
+    { title, body: lines[0], url: kind === 'co2' ? '/app' : '/app/devices', tag: `${kind}-${deviceId}` },
+  ).catch((e) => console.error('push failed', e))
   await q('UPDATE alert_events SET notified_at = now() WHERE id = $1', [eventId], c)
 }
 

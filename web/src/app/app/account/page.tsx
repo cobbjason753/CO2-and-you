@@ -3,7 +3,9 @@ import { requireUser } from '@/lib/auth'
 import { subscriptionForUser } from '@/lib/billing'
 import { Card, PageHeader, Field, Input, Select, Badge, Notice, LinkButton, buttonClass } from '@/components/ui'
 import { ActionForm } from '@/components/forms'
-import { saveProfile, changePassword, openBilling, deleteAccount } from '../actions'
+import { AppSetup } from '@/components/portal/app-setup'
+import { vapidPublicKey } from '@/lib/push'
+import { saveProfile, changePassword, openBilling, deleteAccount, enablePush, disablePush, testPush } from '../actions'
 
 export const metadata = { title: 'Account' }
 
@@ -46,6 +48,11 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
             </Field>
           </div>
         </ActionForm>
+      </Card>
+
+      <Card title="App & notifications" className="scroll-mt-20">
+        <div id="app" />
+        <AppSetup vapidKey={vapidPublicKey()} enablePush={enablePush} disablePush={disablePush} testPush={testPush} />
       </Card>
 
       <Card title="Two-step verification" action={user.totp_enabled ? <Badge tone="good">On</Badge> : <Badge>Off</Badge>}>

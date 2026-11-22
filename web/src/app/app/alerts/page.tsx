@@ -28,7 +28,7 @@ export default async function AlertsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Alerts" sub="We email everyone in the household. Push and text messages are coming later." />
+      <PageHeader title="Alerts" sub={<>We email everyone in the household, and send a notification to phones with the app installed and notifications on (<a href="/app/account#app" className="text-brand">set up</a>).</>} />
       {!isOwner && <Notice>Only house owners can change alert settings.</Notice>}
 
       <Card title="House settings">

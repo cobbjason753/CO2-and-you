@@ -7,6 +7,7 @@ export const metadata = { title: 'More' }
 const LINKS = [
   { href: '/app/reports', label: 'Weekly reports', sub: 'Summary email for each house' },
   { href: '/app/household', label: 'Household', sub: 'Members, invites, houses' },
+  { href: '/app/account#app', label: 'App & notifications', sub: 'Install CobSci on your phone, alert notifications' },
   { href: '/app/account', label: 'Account', sub: 'Profile, password, billing, your data' },
   { href: '/app/help', label: 'Help', sub: 'CO2 explained, setup, calibration, contact us' },
 ]

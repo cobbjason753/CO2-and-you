@@ -24,6 +24,11 @@ touches the database.
 - Account: profile, °F/°C, password, optional two-step verification (authenticator app), subscription status and link to Stripe's billing page, download my data (ZIP), delete my account.
 - Help: CO2 explainer, setup, calibration, privacy summary, contact support (house and device status attached automatically).
 
+**Phone app (installable web app)**
+- Customers install CobSci from the browser (Android: *Install app*; iPhone: Share › *Add to Home Screen*); it opens full-screen with its own icon. Set up under Account › App & notifications, with a dismissible "Get the app" banner on Home.
+- Push notifications for CO2 and offline alerts on each phone that turns them on (iPhone needs iOS 16.4+ and the app installed), alongside the alert emails. Needs `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (generate once with `npx web-push generate-vapid-keys`; changing them means every phone has to turn notifications on again).
+- Offline screen when there's no connection. Portal pages are never cached on the phone, so private data isn't left behind.
+
 **Admin and back office (`/admin`, staff only, two-step verification required, every action audited)**
 - Provisioning: register flashed boards (DEVICE_ID, firmware, test result, optional device secret), print labels (QR of claim link + claim code + DEVICE_ID barcode), unknown devices trying to connect.
 - Packing station: paid unshipped orders, scan units (rejects unknown / failed test / already assigned), count check, address label unlocks when the count matches, mark shipped → welcome or "new sensors" email. Manual orders for testing or phone orders.
