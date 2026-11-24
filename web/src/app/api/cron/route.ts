@@ -2,6 +2,7 @@ import { pool, q } from '@/lib/db'
 import { checkOffline } from '@/lib/alerts'
 import { deliverOutbox } from '@/lib/email'
 import { sendWeeklyReports } from '@/lib/reports'
+import { sendDailyReports } from '@/lib/daily-report'
 import { env } from '@/lib/env'
 
 export const dynamic = 'force-dynamic'
@@ -19,9 +20,11 @@ export async function GET(req: Request) {
   const offline = await checkOffline(pool())
   let reports = 0
   if (now.getUTCDay() === 1 && now.getUTCHours() >= 13) reports = await sendWeeklyReports(now)
+  // Daily report: each house once a day, after 7 am in its own time zone.
+  const daily = await sendDailyReports(now)
   const emails = await deliverOutbox()
   await q(`DELETE FROM sessions WHERE expires_at < now()`)
   await q(`DELETE FROM rate_limits WHERE window_start < now() - interval '1 day'`)
   await q(`DELETE FROM tokens WHERE expires_at < now() - interval '7 days'`)
-  return Response.json({ ok: true, offline, reports, emails })
+  return Response.json({ ok: true, offline, reports, daily, emails })
 }
