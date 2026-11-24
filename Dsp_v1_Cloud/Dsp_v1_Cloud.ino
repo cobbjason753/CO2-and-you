@@ -194,6 +194,11 @@ void setup() {
   lastSentTs = prefs.getLong64("lastSent", 0);
   //End jcobb changes
 
+  // Start the CO2 sensor before Wi-Fi and take one real measurement. The result is printed as a
+  // SENSORTEST line that the factory flasher (Admin > Provisioning > Flash & register) reads, so a
+  // sensor that answers but never measures fails at the bench, not at a customer's house.
+  sensorSelfTest();
+
   connectWiFiWithSetupPortal();
   Serial.println("CP7: WiFi connected");
 
@@ -215,9 +220,6 @@ void setup() {
   }
   Serial.println("CP8: time synced");
 
-  mySensor.stopPeriodicMeasurement();
-  delay(500);
-  sensorOK = mySensor.begin();
   Serial.println(sensorOK ? "CP9: sensor found" : "CP9: Sensor not detected!");
 
   server.on("/", handleRoot);
@@ -292,6 +294,39 @@ void screenWake() {
   if (!oledOK || !screenBlanked) return;
   display.ssd1306_command(SSD1306_DISPLAYON);
   screenBlanked = false;
+}
+
+const unsigned long SENSOR_TEST_MS = 12000;   // SCD4x gives its first measurement after ~5 s
+
+void sensorSelfTest() {
+  mySensor.stopPeriodicMeasurement();
+  delay(500);
+  sensorOK = mySensor.begin();   // also starts periodic measurement
+  if (!sensorOK) {
+    Serial.println("SENSORTEST: fail (CO2 sensor not detected)");
+    return;
+  }
+  if (oledOK) {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setCursor(0, 20);
+    display.println("Checking CO2 sensor");
+    display.display();
+  }
+  unsigned long start = millis();
+  while (millis() - start < SENSOR_TEST_MS) {
+    if (mySensor.readMeasurement()) {
+      int co2 = (int)mySensor.getCO2();
+      float t = mySensor.getTemperature();
+      float h = mySensor.getHumidity();
+      bool plausible = co2 >= 250 && co2 <= 40000 && t > -20 && t < 70 && h >= 0 && h <= 100;
+      Serial.printf("SENSORTEST: %s co2=%d temp=%.1f hum=%.1f (%lu ms)\n", plausible ? "ok" : "fail", co2, t, h, millis() - start);
+      return;
+    }
+    otaTrialTick();
+    delay(250);
+  }
+  Serial.printf("SENSORTEST: fail (no measurement in %lu s)\n", SENSOR_TEST_MS / 1000);
 }
 
 void updateDisplay() {

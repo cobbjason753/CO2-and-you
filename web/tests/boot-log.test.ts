@@ -40,3 +40,24 @@ describe('boot log parser', () => {
     expect(b.deviceId).toBe('esp32-A4CB8FDA3E5C')
   })
 })
+
+describe('v12 sensor self-test', () => {
+  const v12 = LOG.replace('Firmware v11', 'Firmware v12')
+  it('waits for the SENSORTEST line on v12+', () => {
+    const b = parseBootLog(v12)
+    expect(b.complete).toBe(false)
+    expect(b.sensorFound).toBe(false)
+  })
+  it('passes on a real, plausible measurement', () => {
+    const b = parseBootLog(v12 + '\nCP6: LittleFS done\nSENSORTEST: ok co2=612 temp=21.3 hum=44.0 (5230 ms)\n')
+    expect(b).toMatchObject({ complete: true, sensorFound: true, sensorTest: { ok: true, co2: 612 } })
+  })
+  it('fails when the sensor answers on I2C but never measures', () => {
+    const b = parseBootLog(v12 + '\nSENSORTEST: fail (no measurement in 12 s)\n')
+    expect(b.i2c).toContain(0x62)
+    expect(b).toMatchObject({ complete: true, sensorFound: false, sensorTest: { ok: false, detail: '(no measurement in 12 s)' } })
+  })
+  it('keeps the I2C check for older firmware', () => {
+    expect(parseBootLog(LOG)).toMatchObject({ complete: true, sensorFound: true, sensorTest: null })
+  })
+})

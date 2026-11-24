@@ -3,7 +3,15 @@ import { encrypt } from './crypto'
 import { provisionDevice, normalizeDeviceId, DEVICE_ID_RE } from './devices'
 import { audit, type Actor } from './audit'
 
-export type FlashInput = { deviceId: string; secret: string; fw: number | null; sensorFound: boolean; screenFound: boolean; notes?: string }
+export type FlashInput = {
+  deviceId: string
+  secret: string
+  fw: number | null
+  sensorFound: boolean
+  screenFound: boolean
+  sensorDetail?: string // v12+: the SENSORTEST result, e.g. 'co2=612 temp=21.3 hum=44.0'
+  notes?: string
+}
 
 export type FlashResult =
   | {
@@ -30,7 +38,7 @@ export async function registerFlashed(input: FlashInput, actor: Actor, ip = ''):
   if (!/^[0-9a-f]{64}$/.test(secret)) return { ok: false, error: 'The board did not report a valid key.' }
   const testResult: 'pass' | 'fail' = input.sensorFound && input.screenFound ? 'pass' : 'fail'
   const fw = Number.isInteger(input.fw) ? input.fw : null
-  const details = { fw, test_result: testResult, sensor: input.sensorFound, screen: input.screenFound, via: 'browser flasher' }
+  const details = { fw, test_result: testResult, sensor: input.sensorFound, sensor_test: input.sensorDetail?.slice(0, 120) ?? null, screen: input.screenFound, via: 'browser flasher' }
 
   const existing = await one<{ house_id: string | null }>('SELECT house_id FROM devices WHERE id = $1', [id])
   if (existing) {
@@ -70,6 +78,6 @@ export async function registerFlashed(input: FlashInput, actor: Actor, ip = ''):
     message:
       testResult === 'pass'
         ? 'Registered. Print its label.'
-        : 'Registered as FAILED factory test — no label. Check the sensor and screen connections and flash it again.',
+        : 'Registered as FAILED factory test — no label. Check the CO2 sensor (it must give a real measurement) and the screen, then flash it again.',
   }
 }

@@ -22,7 +22,7 @@ export default async function FlashPage() {
         <ol className="list-decimal space-y-1 pl-5 text-sm">
           <li>Use <b>Chrome or Edge</b> on a computer. Plug the board in with a USB <b>data</b> cable.</li>
           <li>Click <b>Flash a board</b> and pick the board&apos;s port (usually “USB JTAG/serial debug unit”, or CP210x / CH340 on boards with a separate USB chip).</li>
-          <li>Wait for “Done”. The board is wiped, flashed, restarted and checked: its <b>CO2 sensor</b> and <b>screen</b> must both be found to pass.</li>
+          <li>Wait for “Done”. The board is wiped, flashed, restarted and checked: its <b>CO2 sensor</b> must give a real measurement (firmware v12 and later) and its <b>screen</b> must be found to pass.</li>
           <li>Print the label, stick it on the board and box, unplug, next board.</li>
         </ol>
         <p className="mt-3 text-xs text-muted">
