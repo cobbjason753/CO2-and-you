@@ -13,7 +13,11 @@ export default async function ProvisioningPage({ searchParams }: { searchParams:
   const unknown = await q<any>(`SELECT * FROM unknown_devices ORDER BY last_seen_at DESC LIMIT 20`)
   return (
     <div className="space-y-5">
-      <PageHeader title="Provisioning" sub="Register flashed and tested boards, then print their serial labels." />
+      <PageHeader
+        title="Provisioning"
+        sub="Register flashed and tested boards, then print their serial labels."
+        action={<Link href="/admin/provisioning/flash" className="inline-flex min-h-11 items-center rounded-xl bg-brand px-4 text-sm font-semibold text-brand-ink">Flash &amp; register a board</Link>}
+      />
       <Card title="Register boards">
         <ProvisionForm action={provision} defaultDevices={(sp.ids ?? '').split(',').filter(Boolean).join('\n')}>
           <div className="grid gap-3 sm:grid-cols-3">

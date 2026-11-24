@@ -29,5 +29,9 @@ jobs:
           arduino-cli lib install "WiFiManager" "Adafruit SSD1306" "Adafruit GFX Library" "SparkFun SCD4x Arduino Library" "ArduinoJson"
       - name: Compile
         run: arduino-cli compile --fqbn "$FQBN" --warnings default --output-dir build "$SKETCH"
-      - name: Size
-        run: ls -l build/*.bin
+      - name: Size and factory image
+        run: |
+          ls -l build/*.bin
+          APP=$(stat -c%s build/$SKETCH.ino.bin)
+          head -c $((0x10000 + APP)) build/$SKETCH.ino.merged.bin > build/factory.bin
+          cmp -n "$APP" -i 0x10000:0 build/factory.bin build/$SKETCH.ino.bin && echo "factory image OK ($(stat -c%s build/factory.bin) bytes)"

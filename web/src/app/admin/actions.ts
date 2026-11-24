@@ -12,6 +12,7 @@ import { qrSvg, code128Svg } from '@/lib/barcode'
 import { randomToken, sha256 } from '@/lib/crypto'
 import { sendEmail } from '@/lib/email'
 import { env } from '@/lib/env'
+import { registerFlashed, type FlashInput, type FlashResult } from '@/lib/flash-register'
 import { run, str, int, UserError, type FormState } from '@/lib/action'
 
 async function staff() {
@@ -326,4 +327,14 @@ export async function setPilotGroup(_: FormState, d: FormData): Promise<FormStat
     await audit(actor, 'firmware.pilot_group', null, { devices: ids }, ip)
     return `Pilot group is now ${ids.length} device${ids.length === 1 ? '' : 's'}.`
   }, '/admin/firmware')
+}
+
+// ---------- Flash & register (browser flasher at Admin > Provisioning > Flash) ----------
+export type { FlashResult } from '@/lib/flash-register'
+
+export async function registerFlashedBoard(input: FlashInput): Promise<FlashResult> {
+  const { actor, ip } = await staff()
+  const r = await registerFlashed(input, actor, ip)
+  if (!r.ok) return r
+  return { ...r, label: r.claimCode && r.testResult === 'pass' ? await makeLabel(r.deviceId, r.claimCode, input.fw) : null, claimCode: undefined }
 }

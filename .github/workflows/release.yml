@@ -80,12 +80,26 @@ jobs:
           sha256sum "site/firmware-v$V.bin"
           ls -l site
 
+      # Factory image for new boards (Admin > Provisioning > Flash & register): bootloader,
+      # 16 MB partition table and app in one file, flashed at 0x0. The build's merged image is
+      # padded to the full 16 MB; everything after the app is empty, so it is trimmed off.
+      - name: Make factory image
+        run: |
+          V=${{ steps.ver.outputs.version }}
+          APP=$(stat -c%s "build/$SKETCH.ino.bin")
+          mkdir -p factory
+          head -c $((0x10000 + APP)) "build/$SKETCH.ino.merged.bin" > "factory/firmware-v$V-factory.bin"
+          cmp -n "$APP" -i 0x10000:0 "factory/firmware-v$V-factory.bin" "build/$SKETCH.ino.bin" && echo "app matches"
+          ls -l factory
+
       # Attach the build to the GitHub Release first: the CobSci platform (Admin > Firmware) links
       # to it, so a GitHub Pages outage can't hold up a platform rollout.
       - name: Keep a copy on the GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: site/firmware-v${{ steps.ver.outputs.version }}.bin
+          files: |
+            site/firmware-v${{ steps.ver.outputs.version }}.bin
+            factory/firmware-v${{ steps.ver.outputs.version }}-factory.bin
 
       - uses: actions/upload-pages-artifact@v3
         with:
