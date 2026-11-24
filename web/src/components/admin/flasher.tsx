@@ -37,7 +37,7 @@ export function Flasher({
   register,
 }: {
   versions: { version: number; stage: string }[]
-  register: (input: { deviceId: string; secret: string; fw: number | null; sensorFound: boolean; screenFound: boolean; notes?: string }) => Promise<FlashResult>
+  register: (input: { deviceId: string; secret: string; fw: number | null; sensorFound: boolean; screenFound: boolean; sensorDetail?: string; notes?: string }) => Promise<FlashResult>
 }) {
   const [supported, setSupported] = useState<boolean | null>(null)
   const [version, setVersion] = useState<number | null>(versions[0]?.version ?? null)
@@ -178,7 +178,7 @@ export function Flasher({
       } catch {}
 
       setStep('registering')
-      const r = await register({ deviceId: info.deviceId!, secret: info.secret!, fw: info.fw, sensorFound: info.sensorFound, screenFound: info.screenFound, notes })
+      const r = await register({ deviceId: info.deviceId!, secret: info.secret!, fw: info.fw, sensorFound: info.sensorFound, screenFound: info.screenFound, sensorDetail: info.sensorTest?.detail, notes })
       setResult(r)
       if (!r.ok) throw new Error(r.error)
       setCount((n) => n + 1)
@@ -210,7 +210,7 @@ export function Flasher({
         await port.close()
       } catch {}
       setStep('registering')
-      const r = await register({ deviceId: info.deviceId!, secret: info.secret!, fw: info.fw, sensorFound: info.sensorFound, screenFound: info.screenFound, notes })
+      const r = await register({ deviceId: info.deviceId!, secret: info.secret!, fw: info.fw, sensorFound: info.sensorFound, screenFound: info.screenFound, sensorDetail: info.sensorTest?.detail, notes })
       setResult(r)
       if (!r.ok) throw new Error(r.error)
       setCount((n) => n + 1)
@@ -268,8 +268,20 @@ export function Flasher({
               <dd className="font-mono text-xs">{boot.deviceId ?? '…'}</dd>
               <dt className="text-muted">Key</dt>
               <dd>{boot.secret ? 'received' : '…'}</dd>
-              <dt className="text-muted">CO2 sensor (0x62)</dt>
-              <dd className={boot.scanDone ? (boot.sensorFound ? 'text-good' : 'font-semibold text-danger') : ''}>{boot.scanDone ? (boot.sensorFound ? '✓ found' : '✕ not found') : '…'}</dd>
+              <dt className="text-muted">CO2 sensor</dt>
+              <dd className={boot.sensorTest || (boot.scanDone && (boot.fw ?? 0) < 12) ? (boot.sensorFound ? 'text-good' : 'font-semibold text-danger') : ''}>
+                {boot.sensorTest
+                  ? boot.sensorTest.ok
+                    ? `✓ measured ${boot.sensorTest.co2} ppm`
+                    : `✕ ${boot.sensorTest.detail.replace(/^\(|\)$/g, '') || 'no measurement'}`
+                  : boot.scanDone && (boot.fw ?? 0) < 12
+                    ? boot.sensorFound
+                      ? '✓ answers (older firmware: no measurement test)'
+                      : '✕ not found'
+                    : boot.scanDone
+                      ? 'measuring…'
+                      : '…'}
+              </dd>
               <dt className="text-muted">Screen (0x3C)</dt>
               <dd className={boot.screen !== null ? (boot.screenFound ? 'text-good' : 'font-semibold text-danger') : ''}>{boot.screen !== null ? (boot.screenFound ? '✓ found' : '✕ not found') : '…'}</dd>
             </dl>
