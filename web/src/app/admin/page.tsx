@@ -28,6 +28,7 @@ export default async function AdminHome() {
         <Tile label="Reporting (24 h)" value={`${m.reporting_24h}/${m.assigned}`} href="/admin/fleet" />
         <Tile label="Offline devices" value={f.offline.length} href="/admin/fleet#offline" warn={f.offline.length > 0} />
         <Tile label="Failing uploads" value={f.failing.length} href="/admin/fleet#failing" warn={f.failing.length > 0} />
+        <Tile label="Connected, no readings" value={f.noReadings.length} href="/admin/fleet" warn={f.noReadings.length > 0} />
         <Tile label="Unknown devices" value={f.unknown.length} href="/admin/fleet#unknown" warn={f.unknown.length > 0} />
         <Tile label="Open support" value={m.open_support} href="/admin/support" warn={m.open_support > 0} />
       </div>

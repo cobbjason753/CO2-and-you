@@ -32,13 +32,20 @@ export async function fleetHealth() {
   const latest = await one<{ v: number | null }>(`SELECT max(version) AS v FROM firmware_releases WHERE stage = 'general'`)
   const base = `SELECT d.id, d.house_id, d.status, d.fw_version, d.last_seen_at, d.last_rssi, d.ingest_errors, d.last_error, d.last_error_at, r.name AS room
                   FROM devices d LEFT JOIN rooms r ON r.id = d.room_id`
-  const [offline, failing, outdated, weak, unknown, unclaimed] = await Promise.all([
+  const [offline, failing, outdated, weak, unknown, unclaimed, noReadings] = await Promise.all([
     q(`${base} WHERE d.status = 'assigned' AND (d.last_seen_at IS NULL OR d.last_seen_at < now() - interval '1 hour') ORDER BY d.last_seen_at NULLS FIRST LIMIT 200`),
     q(`${base} WHERE d.ingest_errors > 0 AND d.last_error_at > now() - interval '24 hours' ORDER BY d.ingest_errors DESC LIMIT 200`),
     latest?.v ? q(`${base} WHERE d.status = 'assigned' AND coalesce(d.fw_version, 0) < $1 ORDER BY d.fw_version NULLS FIRST LIMIT 200`, [latest.v]) : Promise.resolve([]),
     q(`${base} WHERE d.status = 'assigned' AND d.last_rssi < -80 AND d.last_seen_at > now() - interval '1 day' ORDER BY d.last_rssi LIMIT 200`),
     q(`SELECT * FROM unknown_devices ORDER BY last_seen_at DESC LIMIT 200`),
     q(`${base} WHERE d.house_id IS NULL AND d.last_seen_at > now() - interval '7 days' ORDER BY d.last_seen_at DESC LIMIT 200`),
+    // Checking in (firmware v10+) but no CO2 reading for 20+ minutes: the sensor module, not the network.
+    q(`SELECT d.id, d.house_id, d.status, d.fw_version, d.last_seen_at, d.last_rssi, d.ingest_errors, d.last_error, d.last_error_at, r.name AS room,
+              d.last_reading_at, d.sensor_state, d.device_note
+         FROM devices d LEFT JOIN rooms r ON r.id = d.room_id
+        WHERE d.status = 'assigned' AND d.last_seen_at > now() - interval '20 minutes'
+          AND (d.last_reading_at IS NULL OR d.last_reading_at < now() - interval '20 minutes')
+        ORDER BY d.last_reading_at NULLS FIRST LIMIT 200`),
   ])
-  return { latest: latest?.v ?? null, offline, failing, outdated, weak, unknown, unclaimed }
+  return { latest: latest?.v ?? null, offline, failing, outdated, weak, unknown, unclaimed, noReadings }
 }

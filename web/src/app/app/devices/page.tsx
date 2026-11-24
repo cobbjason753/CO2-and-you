@@ -1,6 +1,6 @@
 import { requireHouse } from '@/lib/houses'
 import { q } from '@/lib/db'
-import { timeAgo, isOnline, signalBars } from '@/lib/units'
+import { timeAgo, isOnline, signalBars, hasFreshReading } from '@/lib/units'
 import { Card, PageHeader, Field, Input, Select, Badge, SignalBars, Notice, Empty } from '@/components/ui'
 import { ActionForm } from '@/components/forms'
 import { ToggleSwitch } from '@/components/portal/toggle'
@@ -13,7 +13,7 @@ export default async function DevicesPage({ searchParams }: { searchParams: Prom
   const { house } = await requireHouse()
   const isOwner = house.role === 'owner'
   const devices = await q<any>(
-    `SELECT d.id, d.room_id, r.name AS room, d.fw_version, d.last_rssi, d.last_seen_at, d.assigned_at, d.display_on
+    `SELECT d.id, d.room_id, r.name AS room, d.fw_version, d.last_rssi, d.last_seen_at, d.last_reading_at, d.assigned_at, d.display_on
        FROM devices d LEFT JOIN rooms r ON r.id = d.room_id
       WHERE d.house_id = $1 ORDER BY r.name NULLS FIRST, d.id`,
     [house.id],
@@ -42,7 +42,13 @@ export default async function DevicesPage({ searchParams }: { searchParams: Prom
                   <h2 className="text-lg font-semibold">{d.room ?? 'Unnamed device'}</h2>
                   <p className="font-mono text-xs text-muted">{d.id}</p>
                 </div>
-                {online ? <Badge tone="good">Online</Badge> : <Badge>{d.last_seen_at ? 'Offline' : 'Not connected yet'}</Badge>}
+                {online && hasFreshReading(d.last_reading_at) ? (
+                  <Badge tone="good">Online</Badge>
+                ) : online ? (
+                  <Badge tone="fair">Online · no readings</Badge>
+                ) : (
+                  <Badge>{d.last_seen_at ? 'Offline' : 'Not connected yet'}</Badge>
+                )}
               </div>
               <dl className="mt-3 grid grid-cols-3 gap-2 text-sm">
                 <div>

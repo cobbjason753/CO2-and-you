@@ -8,6 +8,8 @@ import { otaOfferFor } from '../src/lib/firmware'
 import { checkOffline } from '../src/lib/alerts'
 import { houseSeries } from '../src/lib/readings'
 import { sendWeeklyReports } from '../src/lib/reports'
+import { hmacHex } from '../src/lib/crypto'
+import { handleReadings } from '../src/lib/ingest'
 
 describe('device ingest', () => {
   it('rejects unknown devices and logs them for staff', async () => {
@@ -183,7 +185,7 @@ describe('alerts and reports', () => {
     expect((await one(`SELECT resolved_at FROM alert_events WHERE device_id = $1`, [d.id])).resolved_at).not.toBeNull()
 
     // Offline alert after the house threshold (6 h)
-    await q(`UPDATE devices SET last_seen_at = now() - interval '7 hours' WHERE id = $1`, [d.id])
+    await q(`UPDATE devices SET last_seen_at = now() - interval '7 hours', last_reading_at = now() - interval '7 hours' WHERE id = $1`, [d.id])
     const { pool } = await import('../src/lib/db')
     expect(await checkOffline(pool())).toBeGreaterThanOrEqual(1)
     expect(await checkOffline(pool())).toBe(0) // not re-opened
@@ -205,5 +207,47 @@ describe('screen & light setting', () => {
     expect((await upload(d, [[nowS() - 60, 600, 21, 40]])).body.display).toBe(true)
     await q('UPDATE devices SET display_on = false WHERE id = $1', [d.id])
     expect((await upload(d, [[nowS(), 610, 21, 40]])).body.display).toBe(false)
+  })
+})
+
+describe('check-ins without readings (firmware v10)', () => {
+  const checkIn = (d: { id: string; secret: string }, extra: Record<string, unknown>) => {
+    const body = JSON.stringify({ fw: 10, rssi: -60, readings: [], ...extra })
+    const ts = String(nowS())
+    return handleReadings(body, { deviceId: d.id, ts, sig: hmacHex(d.secret, `${d.id}\n${ts}\n${body}`) }, '1.2.3.4')
+  }
+
+  it('keeps the unit online, records sensor health and its note, and alerts when readings stop', async () => {
+    const order = await createOrder({ source: 'manual', email: 'nodata@example.com', deviceQty: 1 })
+    const o = await one('SELECT * FROM orders WHERE id = $1', [order.orderId])
+    await q(`UPDATE users SET password_hash = 'x' WHERE id = $1`, [o.user_id])
+    const staff = await one(`INSERT INTO users (email, role) VALUES ('s-nodata@x.com', 'staff') RETURNING id`)
+    const d = await provisioned()
+    await scanUnit(order.orderId, d.id, staff.id)
+    await enroll(d)
+    await upload(d, [[nowS() - 60, 650, 21, 40]])
+    expect((await one('SELECT sensor_state FROM devices WHERE id = $1', [d.id])).sensor_state).toBe('ok')
+
+    const r = await checkIn(d, { sensor: 'no_data', note: 'v9 rolled back: no successful upload in time' })
+    expect(r.status).toBe(200)
+    expect(r.body.accepted).toBe(0)
+    const dev = await one('SELECT * FROM devices WHERE id = $1', [d.id])
+    expect(dev.sensor_state).toBe('no_data')
+    expect(dev.device_note).toBe('v9 rolled back: no successful upload in time')
+    expect(dev.fw_version).toBe(10)
+
+    // Connected (recent check-in) but no reading for longer than the house's offline threshold (6 h)
+    await q(`UPDATE devices SET last_reading_at = now() - interval '7 hours', last_seen_at = now() WHERE id = $1`, [d.id])
+    const { pool } = await import('../src/lib/db')
+    expect(await checkOffline(pool())).toBeGreaterThanOrEqual(1)
+    const mail = await one(`SELECT subject FROM email_outbox WHERE to_email = 'nodata@example.com' AND kind = 'alert' ORDER BY id DESC LIMIT 1`)
+    expect(mail.subject).toMatch(/isn't measuring/)
+
+    // A check-in alone doesn't clear it; a real reading does
+    await checkIn(d, { sensor: 'no_data' })
+    expect((await one(`SELECT resolved_at FROM alert_events WHERE device_id = $1 AND kind = 'offline'`, [d.id])).resolved_at).toBeNull()
+    await upload(d, [[nowS(), 640, 21, 40]])
+    expect((await one(`SELECT resolved_at FROM alert_events WHERE device_id = $1 AND kind = 'offline'`, [d.id])).resolved_at).not.toBeNull()
+    expect((await one('SELECT sensor_state FROM devices WHERE id = $1', [d.id])).sensor_state).toBe('ok')
   })
 })

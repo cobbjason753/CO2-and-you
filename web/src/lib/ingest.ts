@@ -110,6 +110,9 @@ export async function handleReadings(raw: string, h: { deviceId: string | null; 
   }
   const fw = Number.isInteger(body.fw) ? body.fw : null
   const rssi = Number.isInteger(body.rssi) ? body.rssi : null
+  // Firmware v10+: CO2 sensor health and a note about the device's last problem.
+  const sensor = ['ok', 'no_data', 'missing'].includes(body.sensor) ? (body.sensor as string) : null
+  const note = typeof body.note === 'string' && body.note.trim() ? body.note.replace(/[^\x20-\x7e]/g, '').slice(0, 120) : null
   const list: unknown[] = Array.isArray(body.readings) ? body.readings.slice(0, MAX_READINGS) : []
 
   const now = Date.now() / 1000
@@ -130,6 +133,13 @@ export async function handleReadings(raw: string, h: { deviceId: string | null; 
               target_fw = CASE WHEN target_fw = $2 THEN NULL ELSE target_fw END
         WHERE id = $1`,
       [id, fw, rssi, latest?.[0] ?? null, latest ? Math.round(latest[1]) : null, latest?.[2] ?? null, latest?.[3] ?? null],
+      c,
+    )
+    await q(
+      `UPDATE devices SET sensor_state = coalesce($2, CASE WHEN $4 THEN 'ok' END, sensor_state),
+              device_note = coalesce($3, device_note), device_note_at = CASE WHEN $3 IS NOT NULL THEN now() ELSE device_note_at END
+        WHERE id = $1`,
+      [id, sensor, note, rows.length > 0],
       c,
     )
     // Unassigned devices are flagged (last_seen) but their readings don't go into any house.
