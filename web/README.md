@@ -19,7 +19,7 @@ touches the database.
 - History: 24 h / 7 d / 30 d / custom, rooms overlaid on one chart, CO2 / temperature / humidity, CSV export.
 - Devices: **name or rename a sensor's location in the portal** (this replaces the House ID / Location ID fields on the device's setup page — the new name reaches the sensor's screen within 5 minutes), move a sensor to another room, signal strength and firmware version, claim a sensor by its label code (or by scanning the label's QR code), remove a sensor.
 - Alerts: house CO2 level plus per-room overrides, sensor offline after N hours, email delivery, alert history.
-- Reports: weekly email per house (opt in/out, preview, send now).
+- Reports: **daily report** every morning after 7 am house time (the format from the CO2-and-you-reports repo: what to do, a 24-hour CO2 chart, each room against its past week), plus the weekly summary on Mondays. Each can be turned off; both can be previewed or emailed on demand.
 - Household: invite viewers by email, owner/viewer roles, rename house, time zone, several houses with a switcher.
 - Account: profile, °F/°C, password, optional two-step verification (authenticator app), subscription status and link to Stripe's billing page, download my data (ZIP), delete my account.
 - Help: CO2 explainer, setup, calibration, privacy summary, contact support (house and device status attached automatically).

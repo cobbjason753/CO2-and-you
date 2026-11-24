@@ -9,6 +9,8 @@ import { claimDevice, ensureRoom, unassignDevice } from '@/lib/devices'
 import { hashPassword, verifyPassword, randomToken, sha256 } from '@/lib/crypto'
 import { sendEmail } from '@/lib/email'
 import { sendTestReport } from '@/lib/reports'
+import { houseReport } from '@/lib/daily-report'
+import { sendRawEmail } from '@/lib/email'
 import { billingPortalUrl } from '@/lib/billing'
 import { rateLimit } from '@/lib/ratelimit'
 import { audit } from '@/lib/audit'
@@ -422,5 +424,24 @@ export async function testPush(): Promise<FormState> {
     const n = await pushToUsers([user.id], { title: 'CobSci', body: 'Notifications are working. You’ll hear from us when CO2 is high or a sensor goes offline.', url: '/app/alerts', tag: 'test' })
     if (!n) throw new UserError('Couldn’t reach this device. Turn notifications off and on again.')
     return `Test sent to ${n} device${n === 1 ? '' : 's'}.`
+  })
+}
+
+// ---------- daily report ----------
+export async function setDailyReport(_: FormState, d: FormData): Promise<FormState> {
+  return run(async () => {
+    const { user } = await requireUser()
+    await q('UPDATE users SET daily_report = $2 WHERE id = $1', [user.id, d.get('on') === 'on'])
+    return 'Saved.'
+  }, '/app/reports')
+}
+
+export async function sendDailyReportNow(_: FormState): Promise<FormState> {
+  return run(async () => {
+    const { house, user } = await requireHouse()
+    if (!(await rateLimit(`daily-now:${user.id}`, 3, 3600))) throw new UserError('Too many test emails. Try again later.')
+    const r = await houseReport(house.id, new Date(), user.temp_unit)
+    await sendRawEmail(user.email, r.subject, r.html, r.text, 'daily_report')
+    return `Sent to ${user.email}.`
   })
 }

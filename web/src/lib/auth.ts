@@ -18,6 +18,7 @@ export type User = {
   totp_enabled: boolean
   temp_unit: 'F' | 'C'
   weekly_report: boolean
+  daily_report: boolean
   password_hash: string | null
   stripe_customer_id: string | null
 }
@@ -52,7 +53,7 @@ export const getAuth = cache(async (): Promise<{ session: Session; user: User } 
   if (!raw) return null
   const row = await one(
     `SELECT s.id_hash, s.user_id, s.mfa_ok, s.current_house_id,
-            u.id, u.email, u.name, u.role, u.totp_enabled, u.temp_unit, u.weekly_report, u.password_hash, u.stripe_customer_id
+            u.id, u.email, u.name, u.role, u.totp_enabled, u.temp_unit, u.weekly_report, u.daily_report, u.password_hash, u.stripe_customer_id
        FROM sessions s JOIN users u ON u.id = s.user_id
       WHERE s.id_hash = $1 AND s.expires_at > now()`,
     [sha256(raw)],

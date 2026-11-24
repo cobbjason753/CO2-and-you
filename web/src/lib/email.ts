@@ -54,6 +54,17 @@ export async function sendEmail(
   return id
 }
 
+/** For emails with their own full HTML layout (e.g. the daily report). Same outbox and delivery. */
+export async function sendRawEmail(to: string, subject: string, html: string, text: string, kind = '', c?: Db): Promise<number> {
+  const row = await one<{ id: number }>(
+    'INSERT INTO email_outbox (to_email, subject, html, text_body, kind) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+    [to, subject, html, text, kind],
+    c,
+  )
+  if (!c) await deliver(row!.id)
+  return row!.id
+}
+
 async function deliver(id: number) {
   const key = env.resendKey()
   if (!key) return
