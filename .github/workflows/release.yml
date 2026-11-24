@@ -80,6 +80,13 @@ jobs:
           sha256sum "site/firmware-v$V.bin"
           ls -l site
 
+      # Attach the build to the GitHub Release first: the CobSci platform (Admin > Firmware) links
+      # to it, so a GitHub Pages outage can't hold up a platform rollout.
+      - name: Keep a copy on the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: site/firmware-v${{ steps.ver.outputs.version }}.bin
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
@@ -87,8 +94,3 @@ jobs:
       - name: Publish to GitHub Pages
         id: deploy
         uses: actions/deploy-pages@v4
-
-      - name: Keep a copy on the GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: site/firmware-v${{ steps.ver.outputs.version }}.bin
