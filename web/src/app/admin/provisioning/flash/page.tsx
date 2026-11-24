@@ -7,9 +7,14 @@ import { registerFlashedBoard } from '../../actions'
 export const metadata = { title: 'Flash & register' }
 
 export default async function FlashPage() {
-  // Releases built by the GitHub workflow (linked by URL) have a factory image from v11 on.
+  // Releases built by the GitHub workflow (linked by URL) have a factory image from v11 on
+  // (FIRST_FACTORY_VERSION). Newest first, so the default is the latest build.
+  const FIRST_FACTORY_VERSION = 11
   const versions = await q<{ version: number; stage: string }>(
-    `SELECT version, stage FROM firmware_releases WHERE url IS NOT NULL AND stage IN ('general','pilot') ORDER BY (stage = 'general') DESC, version DESC`,
+    `SELECT version, stage FROM firmware_releases
+      WHERE url IS NOT NULL AND stage IN ('general','pilot') AND version >= $1
+      ORDER BY version DESC`,
+    [FIRST_FACTORY_VERSION],
   )
   return (
     <div className="space-y-4">
