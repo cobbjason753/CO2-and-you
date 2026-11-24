@@ -60,6 +60,8 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
             <dt className="text-muted">Signal</dt><dd>{d.last_rssi ?? '—'} dBm</dd>
             <dt className="text-muted">Screen &amp; light</dt><dd>{d.display_on === false ? 'off (customer setting)' : 'on'}</dd>
             <dt className="text-muted">Latest</dt><dd>{d.last_co2 ?? '—'} ppm · {fmtTemp(d.last_temp_c, 'F')}</dd>
+            <dt className="text-muted">CO2 sensor</dt><dd>{d.sensor_state ?? 'not reported (firmware before v10)'}{d.last_reading_at && ` · last reading ${timeAgo(d.last_reading_at)}`}</dd>
+            <dt className="text-muted">Device note</dt><dd>{d.device_note ? `${d.device_note} (${timeAgo(d.device_note_at)})` : '—'}</dd>
             <dt className="text-muted">Upload errors</dt><dd>{d.ingest_errors}{d.last_error && ` (${d.last_error}, ${timeAgo(d.last_error_at)})`}</dd>
             <dt className="text-muted">Secret</dt><dd>{d.secret_set_at ? `set ${new Date(d.secret_set_at).toLocaleDateString('en-US')}` : 'not yet enrolled'}</dd>
             <dt className="text-muted">OTA offer</dt><dd>{offer ? `v${offer.version}` : 'none (up to date)'}{d.target_fw && ` · forced v${d.target_fw}`}</dd>

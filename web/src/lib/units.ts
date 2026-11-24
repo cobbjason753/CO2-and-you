@@ -39,5 +39,8 @@ export function signalBars(rssi: number | null | undefined): number {
 }
 
 export const OFFLINE_AFTER_MIN = 20 // device reports every 5 minutes
+/** A reading this recent counts as current; older means the CO2 sensor isn't sending data. */
+export const hasFreshReading = (lastReading: Date | string | null | undefined) =>
+  !!lastReading && Date.now() - new Date(lastReading).getTime() < OFFLINE_AFTER_MIN * 60_000
 export const isOnline = (lastSeen: Date | string | null | undefined) =>
   !!lastSeen && Date.now() - new Date(lastSeen).getTime() < OFFLINE_AFTER_MIN * 60_000

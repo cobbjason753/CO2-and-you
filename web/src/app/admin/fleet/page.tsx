@@ -30,6 +30,10 @@ export default async function FleetPage() {
     <div className="space-y-4">
       <PageHeader title="Fleet health" sub={`Latest general firmware: ${f.latest ? `v${f.latest}` : 'none released'}`} />
       <Card title={`Offline > 1 hour (${f.offline.length})`} className="scroll-mt-24"><div id="offline" /><DevTable rows={f.offline} /></Card>
+      <Card title={`Connected but no CO2 readings (${f.noReadings.length})`}>
+        <p className="mb-2 text-xs text-muted">Checking in but the CO2 sensor isn&apos;t producing data (firmware v10+). Usually the sensor module or its wiring.</p>
+        <DevTable rows={f.noReadings} extra={(d) => `${d.sensor_state ?? '?'} · last reading ${timeAgo(d.last_reading_at)}`} />
+      </Card>
       <Card title={`Failing uploads, last 24 h (${f.failing.length})`} className="scroll-mt-24"><div id="failing" /><DevTable rows={f.failing} extra={(d) => `${d.ingest_errors}× ${d.last_error}`} /></Card>
       <Card title={`Outdated firmware (${f.outdated.length})`}><DevTable rows={f.outdated} /></Card>
       <Card title={`Weak signal, below -80 dBm (${f.weak.length})`}><DevTable rows={f.weak} /></Card>

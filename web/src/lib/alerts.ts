@@ -85,15 +85,17 @@ export async function resolveOffline(c: Db, deviceId: string) {
 
 /** Cron: open "offline" alerts for devices that went quiet longer than their house rule. */
 export async function checkOffline(c: Db): Promise<number> {
-  const rows = await q<{ id: string; house_id: string; room_id: string | null; last_seen_at: Date; threshold: number }>(
-    `SELECT d.id, d.house_id, d.room_id, d.last_seen_at, r.threshold
+  // "Offline" means no new readings: either the unit stopped contacting us, or (firmware v10+,
+  // which keeps checking in) it's connected but its CO2 sensor has stopped producing data.
+  const rows = await q<{ id: string; house_id: string; room_id: string | null; last_seen_at: Date; connected: boolean; threshold: number }>(
+    `SELECT d.id, d.house_id, d.room_id, d.last_seen_at, d.last_seen_at > now() - interval '20 minutes' AS connected, r.threshold
        FROM devices d
        JOIN LATERAL (
          SELECT threshold, enabled FROM alert_rules ar
           WHERE ar.house_id = d.house_id AND ar.kind = 'offline' AND (ar.room_id = d.room_id OR ar.room_id IS NULL)
           ORDER BY ar.room_id NULLS LAST LIMIT 1) r ON r.enabled
       WHERE d.status = 'assigned' AND d.last_seen_at IS NOT NULL
-        AND d.last_seen_at < now() - make_interval(hours => r.threshold)
+        AND coalesce(d.last_reading_at, d.last_seen_at) < now() - make_interval(hours => r.threshold)
         AND NOT EXISTS (SELECT 1 FROM alert_events e WHERE e.device_id = d.id AND e.kind = 'offline' AND e.resolved_at IS NULL)`,
     [],
     c,
@@ -105,9 +107,15 @@ export async function checkOffline(c: Db): Promise<number> {
       c,
     )
     const name = await roomName(c, d.room_id)
-    await notify(c, ev!.id, d.house_id, d.id, 'offline', `${name} sensor is offline`, `${name} hasn't reported for ${d.threshold} hours`, [
-      'This usually means the sensor lost power or WiFi. Check it is plugged in. If your WiFi name or password changed, hold the button on the back for 5 seconds to rejoin.',
-    ])
+    if (d.connected) {
+      await notify(c, ev!.id, d.house_id, d.id, 'offline', `${name} sensor isn't measuring`, `${name} hasn't sent a CO2 reading for ${d.threshold} hours`, [
+        'The sensor is still connected, but its CO2 sensor has stopped producing readings. Unplug it for 10 seconds and plug it back in. If that doesn\u2019t help, contact us from the Help page.',
+      ])
+    } else {
+      await notify(c, ev!.id, d.house_id, d.id, 'offline', `${name} sensor is offline`, `${name} hasn't reported for ${d.threshold} hours`, [
+        'This usually means the sensor lost power or WiFi. Check it is plugged in. If your WiFi name or password changed, hold the button on the back for 5 seconds to rejoin.',
+      ])
+    }
   }
   return rows.length
 }

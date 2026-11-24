@@ -3,7 +3,7 @@ import { houseContext } from '@/lib/houses'
 import { q } from '@/lib/db'
 import { houseSeries } from '@/lib/readings'
 import { subscriptionForHouse } from '@/lib/billing'
-import { co2Band, fmtTemp, timeAgo, isOnline } from '@/lib/units'
+import { co2Band, fmtTemp, timeAgo, isOnline, hasFreshReading } from '@/lib/units'
 import { Card, BandBadge, Badge, Empty, Notice, LinkButton, Field, Input, Select, bandText, cx } from '@/components/ui'
 import { ActionForm } from '@/components/forms'
 import { Sparkline } from '@/components/portal/sparkline'
@@ -142,8 +142,10 @@ export default async function Dashboard() {
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {devices.map((d) => {
-          const band = co2Band(d.last_co2)
           const online = isOnline(d.last_seen_at)
+          // Online but no recent reading: the CO2 sensor itself has stopped (firmware v10+ keeps checking in).
+          const fresh = online && hasFreshReading(d.last_reading_at)
+          const band = fresh ? co2Band(d.last_co2) : null
           const alert = openAlerts.find((a) => a.device_id === d.id)
           return (
             <Card key={d.id} className={cx(band === 'poor' && 'border-poor/50')}>
@@ -151,13 +153,19 @@ export default async function Dashboard() {
                 <div className="min-w-0">
                   <h2 className="truncate font-semibold">{d.room ?? 'Unnamed device'}</h2>
                   <p className="text-xs text-muted">
-                    {online ? `Updated ${timeAgo(d.last_reading_at ?? d.last_seen_at)}` : d.last_seen_at ? `Offline · last seen ${timeAgo(d.last_seen_at)}` : 'Waiting for first connection'}
+                    {fresh
+                      ? `Updated ${timeAgo(d.last_reading_at)}`
+                      : online
+                        ? `Connected · last reading ${timeAgo(d.last_reading_at)}`
+                        : d.last_seen_at
+                          ? `Offline · last seen ${timeAgo(d.last_seen_at)}`
+                          : 'Waiting for first connection'}
                   </p>
                 </div>
-                {online ? <BandBadge ppm={d.last_co2} /> : <Badge>Offline</Badge>}
+                {fresh ? <BandBadge ppm={d.last_co2} /> : online ? <Badge tone="fair">No readings</Badge> : <Badge>Offline</Badge>}
               </div>
               <div className="mt-3 flex items-baseline gap-1.5">
-                <span className={cx('tabular text-4xl font-bold', band && online ? bandText[band] : 'text-muted')}>{d.last_co2 ?? '—'}</span>
+                <span className={cx('tabular text-4xl font-bold', band ? bandText[band] : 'text-muted')}>{d.last_co2 ?? '—'}</span>
                 <span className="text-sm text-muted">ppm CO2</span>
               </div>
               <div className="mt-1 flex gap-4 text-sm text-muted tabular">
@@ -167,6 +175,12 @@ export default async function Dashboard() {
               <div className="mt-3">
                 <Sparkline points={spark.get(d.room_id ?? `device:${d.id}`) ?? []} />
               </div>
+              {online && !fresh && (
+                <p className="mt-2 text-xs text-fair">
+                  The sensor is connected but its CO2 sensor isn&apos;t sending readings. Unplug it for 10 seconds and plug it back in; if that doesn&apos;t help,{' '}
+                  <Link href="/app/help" className="underline">contact us</Link>.
+                </p>
+              )}
               {alert && (
                 <p className="mt-2 text-xs font-semibold text-poor">{alert.kind === 'co2' ? 'Above your alert level' : 'Offline alert sent'}</p>
               )}

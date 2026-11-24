@@ -58,6 +58,18 @@ unsigned long lastUploadAttempt = 0;
 const unsigned long API_TIMEOUT_MS   = 30000;   // first request after idle wakes the server and database
 const unsigned long ENROLL_RETRY_MS  = 60000;   // retry enrollment every minute until accepted
 const unsigned long UPLOAD_RETRY_MS  = 60000;   // retry a failed upload after a minute, not at the next sample
+// Check in with the server at least this often, even without new readings, so a unit whose
+// CO2 sensor has stopped is shown as "online, no readings" (not offline) and a new build is
+// kept as long as it can reach the server.
+const unsigned long HEARTBEAT_MS     = 5UL * 60UL * 1000UL;
+const unsigned long FIRST_CHECKIN_MS = 90UL * 1000UL;   // first check-in this soon after start-up
+const unsigned long SENSOR_STALE_MS  = 15UL * 60UL * 1000UL;
+unsigned long lastServerOk = 0;        // millis() of the last 200 from the server
+unsigned long lastReadingMillis = 0;   // millis() of the last successful CO2 reading (0 = none yet)
+unsigned long lastSensorLog = 0;
+// Short note about the last problem (enroll/upload failure, rollback), kept in NVS and sent to
+// the server with the next successful upload so staff can see it without a serial log.
+char diagNote[96] = "";
 Preferences devPrefs;
 // TLS: the core's built-in Mozilla root bundle validates the server certificate
 // (needs ESP32 core 3.3.12+), so a certificate renewal or CA change needs no firmware update.
@@ -167,8 +179,11 @@ void setup() {
   }
   Serial.println("CP5: past OLED block");
 
-  if (!LittleFS.begin(true)) {
-    Serial.println("LittleFS mount failed");
+  // The 16 MB release partition scheme names its data partition "ffat", not "spiffs"
+  // (LittleFS's default), so try both. Without this, buffered readings don't survive a restart.
+  bool fsOk = LittleFS.begin(true) || LittleFS.begin(true, "/littlefs", 10, "ffat");
+  if (!fsOk) {
+    Serial.println("LittleFS mount failed (readings are kept in memory only)");
   } else {
     loadHistoryFromFlash();
   }
@@ -214,6 +229,10 @@ void setup() {
   // Take the first reading soon after start-up instead of a full interval later
   // (unsigned arithmetic, so this is safe even right after boot).
   lastSampleTime = millis() - sampleInterval + FIRST_SAMPLE_MS;
+  lastServerOk = millis() - HEARTBEAT_MS + FIRST_CHECKIN_MS;
+  Serial.printf("BOOT: fw v%d, enrolled %s, OTA trial %s, skipped version %d, sensor %s, note \"%s\"\n",
+                FW_VERSION, enrolled ? "yes" : "no", otaTrial ? "yes" : "no", otaPrefs.getInt("badVer", 0),
+                sensorOK ? "found" : "MISSING", diagNote);
 }
 
 void loop() {
@@ -223,6 +242,7 @@ void loop() {
     lastSampleAttempt = millis();
     if (mySensor.readMeasurement()) {
       lastSampleTime = millis();
+      lastReadingMillis = millis();
       time_t now;
       time(&now);
       history[writeIndex].timestamp = now;
@@ -234,11 +254,16 @@ void loop() {
       saveHistoryToFlash();
       Serial.println("Sample logged.");
       sendReadings();
+    } else if (millis() - lastSensorLog >= 60000) {
+      lastSensorLog = millis();
+      Serial.printf("Sensor: no new CO2 measurement yet (last one %s)\n",
+                    lastReadingMillis ? (String((millis() - lastReadingMillis) / 1000) + " s ago").c_str() : "never since start-up");
     }
   }
 
   if (!enrolled && millis() - lastEnrollAttempt >= ENROLL_RETRY_MS) enrollWithServer();
   if (uploadPending && millis() - lastUploadAttempt >= UPLOAD_RETRY_MS) sendReadings();
+  if (millis() - lastServerOk >= HEARTBEAT_MS && millis() - lastUploadAttempt >= UPLOAD_RETRY_MS) sendHeartbeat();
 
   if (millis() - lastDisplaySwitch >= displayInterval) {
     lastDisplaySwitch = millis();
@@ -469,9 +494,26 @@ void loadDeviceSecret() {
   claimed = devPrefs.getBool("claimed", false);
   displayOn = devPrefs.getBool("display", true);
   serverAnswered = devPrefs.getBool("answered", false);
+  strlcpy(diagNote, devPrefs.getString("note", "").c_str(), sizeof(diagNote));
   String n = devPrefs.getString("name", "");
   strlcpy(displayName, n.c_str(), sizeof(displayName));
   if (!enrolled) Serial.printf("PROVISION: %s %s\n", DEVICE_ID, deviceSecret);
+}
+
+void setDiagNote(const char* fmt, int a, int b) {
+  char buf[sizeof(diagNote)];
+  snprintf(buf, sizeof(buf), fmt, a, b);
+  if (strcmp(buf, diagNote) == 0) return;
+  strlcpy(diagNote, buf, sizeof(diagNote));
+  devPrefs.putString("note", diagNote);
+}
+
+// Sensor health sent with every upload: "ok", "no_data" (no reading for 15 min) or "missing".
+const char* sensorState() {
+  if (!sensorOK) return "missing";
+  if (lastReadingMillis && millis() - lastReadingMillis < SENSOR_STALE_MS) return "ok";
+  if (!lastReadingMillis && millis() < SENSOR_STALE_MS) return "ok";   // still warming up
+  return "no_data";
 }
 
 void hmacSha256Hex(const char* keyHex, const String& msg, char out[65]) {
@@ -517,6 +559,7 @@ void enrollWithServer() {
     Serial.println("API: enrolled");
   } else {
     Serial.printf("API: enroll failed (%d) %s\n", code, http.getString().c_str());
+    setDiagNote("enroll failed (%d) on v%d", code, FW_VERSION);
   }
   http.end();
 }
@@ -525,10 +568,16 @@ void enrollWithServer() {
 //   X-Signature = hex HMAC-SHA256(secret, DEVICE_ID + "\n" + X-Timestamp + "\n" + body)
 // The reply carries the name customers gave this device in the portal and, when staff have
 // rolled out a newer build to it, an OTA offer.
-void sendReadings() {
+void sendReadings() { postReadings(false); }
+void sendHeartbeat() { postReadings(true); }
+
+// heartbeat = check in even if there is nothing new to send.
+void postReadings(bool heartbeat) {
   lastUploadAttempt = millis();
-  uploadPending = readingCount > 0;
-  if (!uploadPending) return;
+  if (!heartbeat) {
+    uploadPending = readingCount > 0;
+    if (!uploadPending) return;
+  }
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("API: upload skipped (WiFi not connected); will retry");
     return;
@@ -541,7 +590,8 @@ void sendReadings() {
     }
   }
 
-  String body = "{\"fw\":" + String(FW_VERSION) + ",\"rssi\":" + String(WiFi.RSSI()) + ",\"readings\":[";
+  String body = "{\"fw\":" + String(FW_VERSION) + ",\"rssi\":" + String(WiFi.RSSI()) +
+                ",\"sensor\":\"" + sensorState() + "\",\"note\":\"" + String(diagNote) + "\",\"readings\":[";
   time_t newest = lastSentTs;
   int n = 0;
   for (int i = 0; i < readingCount; i++) {
@@ -555,7 +605,7 @@ void sendReadings() {
     n++;
   }
   body += "]}";
-  if (n == 0) {
+  if (n == 0 && !heartbeat) {
     uploadPending = false;
     return;
   }
@@ -583,13 +633,23 @@ void sendReadings() {
 
   if (code == 200) {
     uploadPending = false;
-    lastSentTs = newest;
-    prefs.putLong64("lastSent", lastSentTs);
-    Serial.printf("API: uploaded %d reading(s)\n", n);
-    otaMarkGood();   // a successful upload is the health check for a newly installed build
+    lastServerOk = millis();
+    if (n > 0) {
+      lastSentTs = newest;
+      prefs.putLong64("lastSent", lastSentTs);
+      Serial.printf("API: uploaded %d reading(s)\n", n);
+    } else {
+      Serial.printf("API: checked in, no new readings (sensor: %s)\n", sensorState());
+    }
+    if (diagNote[0]) {   // the server has it now
+      diagNote[0] = '\0';
+      devPrefs.putString("note", "");
+    }
+    otaMarkGood();   // reaching the server is the health check for a newly installed build
     handleServerReply(reply);
   } else {
     Serial.printf("API: upload failed (%d) %s; will retry\n", code, reply.c_str());
+    setDiagNote("upload failed (%d) on v%d", code, FW_VERSION);
     if (code == 401 && reply.indexOf("\"enroll\"") >= 0) {   // staff reset our credential
       enrolled = false;
       devPrefs.putBool("enrolled", false);
@@ -675,6 +735,12 @@ void otaRollback(const char* why) {
   otaPrefs.putBool("trial", false);
   otaPrefs.putInt("boots", 0);
   otaPrefs.putInt("badVer", FW_VERSION);      // don't re-download this version
+  {
+    char note[sizeof(diagNote)];
+    snprintf(note, sizeof(note), "v%d rolled back: %s", FW_VERSION, why);
+    strlcpy(diagNote, note, sizeof(diagNote));
+    devPrefs.putString("note", diagNote);
+  }
 
   // With two OTA slots, the "next" slot is the one holding the previous build
   const esp_partition_t* prev = esp_ota_get_next_update_partition(NULL);
